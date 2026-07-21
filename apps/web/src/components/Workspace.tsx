@@ -8,6 +8,7 @@ import {
   Plus, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, X
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
+import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, Project, Proposal, Relation } from '@/lib/types'
 
 type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio'
@@ -120,10 +121,52 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
   const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama'>('auto')
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState<number | null>(null)
+  const [resuming, setResuming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-  useEffect(() => { setMessages([{ role: 'assistant', content: `Project ${project.name} is selected. What should we inspect?` }]); setConversationId(null) }, [project.id, project.name])
+
+  // Auto-resume the last conversation for this project. When the project
+  // changes (or the component first mounts), look up a stored conversation id
+  // and reload its history. If none exists, fall back to a fresh greeting.
+  useEffect(() => {
+    let cancelled = false
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(conversationStorageKey(project.id)) : null
+    const storedId = stored ? Number(stored) : NaN
+    if (!storedId) {
+      setMessages([{ role: 'assistant', content: `Project ${project.name} is selected. What should we inspect?` }])
+      setConversationId(null)
+      return
+    }
+    setResuming(true)
+    api<{ conversation: unknown; messages: unknown }>(`/api/conversations/${storedId}`)
+      .then((body) => {
+        if (cancelled) return
+        const parsed = parseConversationResponse(body as Parameters<typeof parseConversationResponse>[0])
+        if (parsed.messages.length) {
+          setMessages(parsed.messages)
+          setConversationId(parsed.conversation?.id ?? storedId)
+        } else {
+          setMessages([{ role: 'assistant', content: `Project ${project.name} is selected. What should we inspect?` }])
+          setConversationId(null)
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Stored id is stale (deleted, server reset). Clear it and start fresh.
+        window.localStorage.removeItem(conversationStorageKey(project.id))
+        setMessages([{ role: 'assistant', content: `Project ${project.name} is selected. What should we inspect?` }])
+        setConversationId(null)
+      })
+      .finally(() => { if (!cancelled) setResuming(false) })
+    return () => { cancelled = true }
+  }, [project.id, project.name])
+
+  function startNewConversation() {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(conversationStorageKey(project.id))
+    setConversationId(null)
+    setMessages([{ role: 'assistant', content: `Started a new conversation for ${project.name}.` }])
+  }
 
   async function send() {
     const message = input.trim(); if (!message || sending) return
@@ -131,6 +174,7 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
     try {
       const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider }) })
       setConversationId(result.conversation_id)
+      if (typeof window !== 'undefined') window.localStorage.setItem(conversationStorageKey(project.id), String(result.conversation_id))
       setMessages((current) => [...current, { role: 'assistant', content: result.answer, route: result.route, citations: result.citations }])
     } catch (error) {
       setMessages((current) => [...current, { role: 'assistant', content: `Request failed safely: ${error instanceof Error ? error.message : 'Unknown error'}` }])
@@ -139,7 +183,7 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
 
   return <div className="chat-layout">
     <section className="chat-panel">
-      <div className="chat-toolbar"><div><strong>Project conversation</strong><small>Context is retrieved from indexed files and active decisions.</small></div><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}><option value="auto">Automatic router</option><option value="mock">Safe mock</option><option value="ollama" disabled={!ollamaAvailable}>Ollama local</option></select></div>
+      <div className="chat-toolbar"><div><strong>Project conversation</strong><small>{conversationId ? `Conversation #${conversationId}` : 'New conversation'} · context is retrieved from indexed files and active decisions.</small></div><div className="chat-toolbar-actions"><button className="icon-button" title="Start a new conversation" onClick={startNewConversation} disabled={!!resuming || sending}><Plus size={16}/></button><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}><option value="auto">Automatic router</option><option value="mock">Safe mock</option><option value="ollama" disabled={!ollamaAvailable}>Ollama local</option></select></div></div>
       <div className="messages">{messages.map((message, index) => <article key={index} className={`message ${message.role}`}><div className="avatar">{message.role === 'assistant' ? <Bot size={16}/> : 'U'}</div><div className="message-body"><pre>{message.content}</pre>{message.route && <div className="route-card"><strong>{message.route.engine}</strong><span>{message.route.reason}</span><small>{message.route.estimated_ram_mb} MB estimate · {message.route.context_limit.toLocaleString()} token budget</small></div>}{message.citations?.length ? <div className="citations"><b>Sources</b>{message.citations.map((source) => <span key={source.relative_path}>{source.relative_path}</span>)}</div> : null}</div></article>)}{sending && <article className="message assistant"><div className="avatar"><Bot size={16}/></div><div className="message-body typing"><span/><span/><span/></div></article>}<div ref={bottomRef}/></div>
       <div className="composer"><textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }} placeholder="Ask about this project…"/><button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button></div>
     </section>

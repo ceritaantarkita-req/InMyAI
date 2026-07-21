@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/hardware",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/1/index",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/status",
+      "status": 200
+    }
+  ],
+  "project": "Synthetic demo",
+  "index": {
+    "indexed": 0,
+    "unchanged": 4,
+    "removed": 0,
+    "errors": []
+  },
+  "search_hits": 1,
+  "chat_provider": "mock",
+  "chat_citations": 2,
+  "hardware_profile": "lite",
+  "ollama_available": false
+}

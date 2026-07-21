@@ -1,0 +1,7 @@
+# Optional real local image generation plugin.
+# Install only when the user explicitly enables it; the packages and model weights are large.
+diffusers==0.35.1
+transformers==4.55.4
+accelerate==1.10.0
+safetensors==0.6.2
+torch==2.8.0

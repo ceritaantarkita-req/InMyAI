@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    env_file: .env
+    environment:
+      INMYAI_DATA_DIR: /app/data/runtime
+      INMYAI_WORKSPACE_ROOT: /app/workspace
+      INMYAI_ALLOWED_ROOTS: /projects
+    ports:
+      - "8000:8000"
+    volumes:
+      - inmyai-data:/app/data/runtime
+      - inmyai-workspace:/app/workspace
+      - ${INMYAI_HOST_PROJECTS_DIR:-./examples}:/projects:rw
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  inmyai-data:
+  inmyai-workspace:

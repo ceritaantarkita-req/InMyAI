@@ -1,0 +1,222 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
+import {
+  Bot, BrainCircuit, Check, Code2, FileCode2, FileText, FolderOpen, GitBranch,
+  HardDrive, ImageIcon, Laptop, Loader2, MemoryStick, MessageSquareText, Network,
+  Plus, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, X
+} from './Icons'
+import { api, API_URL } from '@/lib/api'
+import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, Project, Proposal, Relation } from '@/lib/types'
+
+type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio'
+type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
+
+const nav: { id: View; label: string; icon: typeof Bot }[] = [
+  { id: 'chat', label: 'Chat', icon: MessageSquareText },
+  { id: 'files', label: 'Files', icon: FileCode2 },
+  { id: 'memory', label: 'Memory', icon: BrainCircuit },
+  { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'studio', label: 'Studio', icon: Sparkles }
+]
+
+export function Workspace() {
+  const [view, setView] = useState<View>('chat')
+  const [projects, setProjects] = useState<Project[]>([])
+  const [projectId, setProjectId] = useState<number | null>(null)
+  const [hardware, setHardware] = useState<Hardware | null>(null)
+  const [ollama, setOllama] = useState<{ available: boolean; models: { name: string }[]; error?: string } | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  const project = projects.find((item) => item.id === projectId) || null
+
+  const loadSystem = useCallback(async () => {
+    try {
+      const [projectData, hardwareData, modelData] = await Promise.all([
+        api<Project[]>('/api/projects'),
+        api<Hardware>('/api/hardware'),
+        api<{ ollama: { available: boolean; models: { name: string }[]; error?: string } }>('/api/models/status')
+      ])
+      setProjects(projectData)
+      setHardware(hardwareData)
+      setOllama(modelData.ollama)
+      setProjectId((current) => current ?? projectData[0]?.id ?? null)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to connect to the local API.')
+    }
+  }, [])
+
+  useEffect(() => { void loadSystem() }, [loadSystem])
+
+  async function indexActiveProject() {
+    if (!projectId) return
+    setBusy(true); setNotice('')
+    try {
+      const result = await api<{ indexed: number; unchanged: number; errors: string[] }>(`/api/projects/${projectId}/index`, { method: 'POST' })
+      setNotice(`Index complete: ${result.indexed} updated, ${result.unchanged} unchanged${result.errors.length ? `, ${result.errors.length} skipped` : ''}.`)
+      await loadSystem()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Index failed.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark"><Bot size={17}/></span><div><strong>InMyAI</strong><small>Local AI Workspace</small></div></div>
+        <div className="project-picker">
+          <span>Active project</span>
+          <select value={projectId ?? ''} onChange={(event) => setProjectId(Number(event.target.value))} aria-label="Active project">
+            {!projects.length && <option value="">No project</option>}
+            {projects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+          </select>
+          {project && <small title={project.path}>{project.path}</small>}
+        </div>
+        <nav>{nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={17}/><span>{item.label}</span></button> })}</nav>
+        <div className="sidebar-spacer"/>
+        <button className="settings-button" onClick={() => setSettingsOpen(true)}><Settings size={17}/>Settings</button>
+        <div className="local-status"><span className={ollama?.available ? 'status-dot online' : 'status-dot'}/><div><strong>{ollama?.available ? 'Ollama ready' : 'Safe mock mode'}</strong><small>{hardware ? `${hardware.profile} profile · ${hardware.ram.available_gb} GB free` : 'Checking hardware'}</small></div></div>
+      </aside>
+
+      <section className="main-column">
+        <header className="topbar">
+          <div><h1>{nav.find((item) => item.id === view)?.label}</h1><p>{project ? project.name : 'Add a local project to begin.'}</p></div>
+          <div className="top-actions">
+            <button className="icon-button" title="Index project" onClick={indexActiveProject} disabled={!project || busy}>{busy ? <Loader2 className="spin" size={18}/> : <RefreshCw size={18}/>}</button>
+            <button className="icon-button" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
+          </div>
+        </header>
+        {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Close notice"><X size={15}/></button></div>}
+        {!project ? <EmptyProject onOpen={() => setSettingsOpen(true)}/> : (
+          <div className="content-area">
+            {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available}/>} 
+            {view === 'files' && <FilesView project={project}/>} 
+            {view === 'memory' && <MemoryView project={project}/>} 
+            {view === 'graph' && <GraphView project={project}/>} 
+            {view === 'studio' && <StudioView project={project}/>} 
+          </div>
+        )}
+      </section>
+
+      <ContextRail project={project} hardware={hardware} ollama={ollama}/>
+      <MobileNav view={view} setView={setView}/>
+      {settingsOpen && <SettingsModal projects={projects} hardware={hardware} ollama={ollama} onClose={() => setSettingsOpen(false)} onChanged={loadSystem}/>} 
+    </main>
+  )
+}
+
+function EmptyProject({ onOpen }: { onOpen: () => void }) {
+  return <div className="empty-state"><FolderOpen size={38}/><h2>Add a local project</h2><p>InMyAI only indexes folders you explicitly register. Private data stays on your device.</p><button className="primary" onClick={onOpen}><Plus size={16}/>Add project</button></div>
+}
+
+function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvailable: boolean }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: 'assistant', content: `Project ${project.name} is selected. Ask about its architecture, files, decisions, or errors. I will retrieve local context before answering.` }
+  ])
+  const [input, setInput] = useState('')
+  const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama'>('auto')
+  const [sending, setSending] = useState(false)
+  const [conversationId, setConversationId] = useState<number | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { setMessages([{ role: 'assistant', content: `Project ${project.name} is selected. What should we inspect?` }]); setConversationId(null) }, [project.id, project.name])
+
+  async function send() {
+    const message = input.trim(); if (!message || sending) return
+    setMessages((current) => [...current, { role: 'user', content: message }]); setInput(''); setSending(true)
+    try {
+      const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider }) })
+      setConversationId(result.conversation_id)
+      setMessages((current) => [...current, { role: 'assistant', content: result.answer, route: result.route, citations: result.citations }])
+    } catch (error) {
+      setMessages((current) => [...current, { role: 'assistant', content: `Request failed safely: ${error instanceof Error ? error.message : 'Unknown error'}` }])
+    } finally { setSending(false) }
+  }
+
+  return <div className="chat-layout">
+    <section className="chat-panel">
+      <div className="chat-toolbar"><div><strong>Project conversation</strong><small>Context is retrieved from indexed files and active decisions.</small></div><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}><option value="auto">Automatic router</option><option value="mock">Safe mock</option><option value="ollama" disabled={!ollamaAvailable}>Ollama local</option></select></div>
+      <div className="messages">{messages.map((message, index) => <article key={index} className={`message ${message.role}`}><div className="avatar">{message.role === 'assistant' ? <Bot size={16}/> : 'U'}</div><div className="message-body"><pre>{message.content}</pre>{message.route && <div className="route-card"><strong>{message.route.engine}</strong><span>{message.route.reason}</span><small>{message.route.estimated_ram_mb} MB estimate · {message.route.context_limit.toLocaleString()} token budget</small></div>}{message.citations?.length ? <div className="citations"><b>Sources</b>{message.citations.map((source) => <span key={source.relative_path}>{source.relative_path}</span>)}</div> : null}</div></article>)}{sending && <article className="message assistant"><div className="avatar"><Bot size={16}/></div><div className="message-body typing"><span/><span/><span/></div></article>}<div ref={bottomRef}/></div>
+      <div className="composer"><textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }} placeholder="Ask about this project…"/><button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button></div>
+    </section>
+    <aside className="activity-panel"><h3>Suggested tasks</h3>{['Explain the architecture', 'Find active database decisions', 'Trace the login dependency path', 'Search for TODO and FIXME'].map((item) => <button key={item} onClick={() => setInput(item)}>{item}<span>↗</span></button>)}<div className="safety-box"><ShieldCheck size={18}/><div><strong>Controlled tools</strong><p>File changes require a diff, explicit approval, and an automatic backup.</p></div></div></aside>
+  </div>
+}
+
+function FilesView({ project }: { project: Project }) {
+  const [files, setFiles] = useState<IndexedFile[]>([])
+  const [selected, setSelected] = useState('')
+  const [content, setContent] = useState('')
+  const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState('')
+  const [proposals, setProposals] = useState<Proposal[]>([])
+  const [loading, setLoading] = useState(false)
+  const filtered = files.filter((file) => file.relative_path.toLowerCase().includes(query.toLowerCase()))
+
+  const load = useCallback(async () => {
+    const [fileData, proposalData] = await Promise.all([
+      api<IndexedFile[]>(`/api/projects/${project.id}/files`),
+      api<Proposal[]>(`/api/projects/${project.id}/proposals`)
+    ])
+    setFiles(fileData); setProposals(proposalData)
+  }, [project.id])
+  useEffect(() => { void load() }, [load])
+
+  async function openFile(path: string) {
+    setLoading(true)
+    try { const result = await api<{ content: string }>(`/api/projects/${project.id}/file?path=${encodeURIComponent(path)}`); setSelected(path); setContent(result.content); setDraft(result.content) } finally { setLoading(false) }
+  }
+  async function propose() {
+    const result = await api<Proposal>('/api/proposals', { method: 'POST', body: JSON.stringify({ project_id: project.id, relative_path: selected, proposed_content: draft }) })
+    setProposals((current) => [result, ...current])
+  }
+  async function applyProposal(id: number) { await api(`/api/proposals/${id}/apply`, { method: 'POST' }); await load(); if (selected) await openFile(selected) }
+  async function rejectProposal(id: number) { await api(`/api/proposals/${id}/reject`, { method: 'POST' }); await load() }
+
+  return <div className="files-layout"><aside className="file-list"><div className="search-input"><Search size={15}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files…"/></div><div className="file-scroll">{filtered.map((file) => <button key={file.id} className={selected === file.relative_path ? 'selected' : ''} onClick={() => void openFile(file.relative_path)}><FileText size={15}/><span>{file.relative_path}</span><small>{formatBytes(file.size_bytes)}</small></button>)}</div></aside><section className="editor-panel">{!selected ? <div className="editor-empty"><FileCode2 size={34}/><h2>Select an indexed file</h2><p>Index the project first if this list is empty.</p></div> : <><div className="editor-toolbar"><div><strong>{selected}</strong><small>Changes stay staged until you approve the diff.</small></div><button className="primary small" onClick={propose} disabled={draft === content}><GitBranch size={15}/>Create proposal</button></div><textarea className="code-editor" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false}/></>}</section><aside className="proposal-panel"><h3>Change proposals</h3>{proposals.length === 0 && <p className="muted">No staged changes.</p>}{proposals.slice(0, 8).map((proposal) => <article key={proposal.id}><div><strong>{proposal.relative_path}</strong><span className={`status ${proposal.status}`}>{proposal.status}</span></div><pre>{proposal.diff || 'New file with no line-level diff.'}</pre>{proposal.status === 'pending' && <footer><button onClick={() => void rejectProposal(proposal.id)}>Reject</button><button className="primary small" onClick={() => void applyProposal(proposal.id)}><Check size={14}/>Apply</button></footer>}</article>)}</aside></div>
+}
+
+function MemoryView({ project }: { project: Project }) {
+  const [memories, setMemories] = useState<Memory[]>([]); const [decisions, setDecisions] = useState<Decision[]>([])
+  const [memoryTitle, setMemoryTitle] = useState(''); const [memoryContent, setMemoryContent] = useState('')
+  const [statement, setStatement] = useState(''); const [supersedes, setSupersedes] = useState('')
+  const load = useCallback(async () => { const [m, d] = await Promise.all([api<Memory[]>(`/api/projects/${project.id}/memories`), api<Decision[]>(`/api/projects/${project.id}/decisions`)]); setMemories(m); setDecisions(d) }, [project.id])
+  useEffect(() => { void load() }, [load])
+  async function addMemory() { await api('/api/memories', { method: 'POST', body: JSON.stringify({ project_id: project.id, kind: 'semantic', title: memoryTitle, content: memoryContent, source: 'user', confidence: 1 }) }); setMemoryTitle(''); setMemoryContent(''); await load() }
+  async function addDecision() { await api('/api/decisions', { method: 'POST', body: JSON.stringify({ project_id: project.id, statement, rationale: '', supersedes_id: supersedes ? Number(supersedes) : null, source: 'user', approved_by: 'user' }) }); setStatement(''); setSupersedes(''); await load() }
+  return <div className="memory-grid"><section><div className="section-heading"><div><h2>Project memory</h2><p>Stable facts and reusable project knowledge.</p></div><MemoryStick size={23}/></div><form className="inline-form" onSubmit={(e) => { e.preventDefault(); void addMemory() }}><input value={memoryTitle} onChange={(e) => setMemoryTitle(e.target.value)} placeholder="Memory title" required/><textarea value={memoryContent} onChange={(e) => setMemoryContent(e.target.value)} placeholder="What should InMyAI remember?" required/><button className="primary"><Save size={15}/>Save memory</button></form><div className="memory-list">{memories.map((item) => <article key={item.id}><span>{item.kind}</span><h3>{item.title}</h3><p>{item.content}</p><small>{item.source} · confidence {Math.round(item.confidence * 100)}%</small></article>)}</div></section><section><div className="section-heading"><div><h2>Decision ledger</h2><p>Active decisions override older, superseded choices.</p></div><GitBranch size={23}/></div><form className="inline-form" onSubmit={(e) => { e.preventDefault(); void addDecision() }}><textarea value={statement} onChange={(e) => setStatement(e.target.value)} placeholder="Record a project decision…" required/><select value={supersedes} onChange={(e) => setSupersedes(e.target.value)}><option value="">Does not supersede another decision</option>{decisions.filter((item) => item.status === 'active').map((item) => <option value={item.id} key={item.id}>Supersedes D{item.id}: {item.statement}</option>)}</select><button className="primary"><Save size={15}/>Record decision</button></form><div className="decision-list">{decisions.map((item) => <article key={item.id} className={item.status}><header><strong>D{item.id}</strong><span className={`status ${item.status}`}>{item.status}</span></header><p>{item.statement}</p>{item.supersedes_id && <small>Supersedes D{item.supersedes_id}</small>}</article>)}</div></section></div>
+}
+
+function GraphView({ project }: { project: Project }) {
+  const [relations, setRelations] = useState<Relation[]>([]); const [node, setNode] = useState(''); const [result, setResult] = useState<{ selected?: string; neighbors?: { direction: string; node: string; relation: string; confidence: string }[] } | null>(null)
+  useEffect(() => { void api<{ relations: Relation[] }>(`/api/projects/${project.id}/graph`).then((data) => setRelations(data.relations)) }, [project.id])
+  async function query() { setResult(await api(`/api/projects/${project.id}/graph?node=${encodeURIComponent(node)}`)) }
+  const nodes = useMemo(() => Array.from(new Set(relations.flatMap((r) => [r.source_node, r.target_node]))).slice(0, 24), [relations])
+  return <div className="graph-layout"><section className="graph-canvas"><div className="graph-search"><Search size={16}/><input value={node} onChange={(e) => setNode(e.target.value)} placeholder="Explain a file, symbol, or dependency"/><button className="primary small" onClick={() => void query()}>Trace</button></div><div className="node-cloud">{nodes.map((item, index) => <button key={item} onClick={() => { setNode(item); setTimeout(() => void query(), 0) }} style={{ '--i': index } as CSSProperties}>{item}</button>)}</div><div className="graph-caption"><Network size={17}/><p>The built-in graph uses deterministic imports and symbol extraction. Graphify graph.json can be integrated as an additional source.</p></div></section><aside className="graph-inspector"><h3>{result?.selected || 'Graph inspector'}</h3>{!result?.neighbors?.length ? <p className="muted">Select or trace a node to inspect its edges.</p> : result.neighbors.map((neighbor, index) => <article key={`${neighbor.node}-${index}`}><span>{neighbor.direction === 'out' ? '→' : '←'} {neighbor.relation}</span><strong>{neighbor.node}</strong><small>{neighbor.confidence}</small></article>)}</aside></div>
+}
+
+function StudioView({ project }: { project: Project }) {
+  const [files, setFiles] = useState<IndexedFile[]>([]); const [ocrFile, setOcrFile] = useState(''); const [ocrText, setOcrText] = useState('')
+  const [prompt, setPrompt] = useState('A clean navy industrial coverall product image on a white studio background.'); const [imageProvider, setImageProvider] = useState<'simulator' | 'comfyui'>('simulator'); const [imageResult, setImageResult] = useState<{ relative_path: string; notice: string; seed: number } | null>(null); const [busy, setBusy] = useState(false)
+  useEffect(() => { void api<IndexedFile[]>(`/api/projects/${project.id}/files`).then(setFiles) }, [project.id])
+  async function ocr() { setBusy(true); try { const result = await api<{ text: string }>('/api/ocr', { method: 'POST', body: JSON.stringify({ project_id: project.id, relative_path: ocrFile, language: 'eng' }) }); setOcrText(result.text) } finally { setBusy(false) } }
+  async function generate() { setBusy(true); try { const result = await api<{ relative_path: string; notice: string; seed: number }>('/api/images/generate', { method: 'POST', body: JSON.stringify({ project_id: project.id, prompt, width: 512, height: 512, steps: 4, seed: -1, provider: imageProvider }) }); setImageResult(result) } finally { setBusy(false) } }
+  return <div className="studio-grid"><section><div className="section-heading"><div><h2>OCR & extract</h2><p>PDF text extraction and local Tesseract OCR.</p></div><FileText size={22}/></div><select value={ocrFile} onChange={(e) => setOcrFile(e.target.value)}><option value="">Choose an indexed PDF or image path</option>{files.filter((file) => ['.pdf','.png','.jpg','.jpeg','.webp'].includes(file.extension)).map((file) => <option key={file.id}>{file.relative_path}</option>)}</select><button className="primary" onClick={() => void ocr()} disabled={!ocrFile || busy}>{busy ? <Loader2 className="spin" size={16}/> : <Search size={16}/>}Extract text</button><textarea className="output-area" value={ocrText} readOnly placeholder="Extracted text appears here…"/></section><section><div className="section-heading"><div><h2>Local image router</h2><p>Workflow simulator in core; real generation uses the optional local Diffusers or ComfyUI plugin.</p></div><ImageIcon size={22}/></div><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe the image…"/><div className="image-controls"><label>512 × 512</label><label>4 low-memory steps</label><label>Batch 1</label></div><select value={imageProvider} onChange={(e) => setImageProvider(e.target.value as 'simulator' | 'comfyui')}><option value="simulator">Workflow simulator</option><option value="comfyui">Local ComfyUI</option></select><button className="primary" onClick={() => void generate()} disabled={busy}>{busy ? <Loader2 className="spin" size={16}/> : <Sparkles size={16}/>}Run {imageProvider === 'comfyui' ? 'local generation' : 'workflow simulator'}</button>{imageResult && <div className="image-result"><img src={`${API_URL}/api/generated-file?project_id=${project.id}&path=${encodeURIComponent(imageResult.relative_path)}`} alt="Generated workflow simulation"/><p>{imageResult.notice}</p><small>Seed {imageResult.seed}</small></div>}</section></div>
+}
+
+function ContextRail({ project, hardware, ollama }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null }) {
+  return <aside className="context-rail"><h3>Context</h3><div className="context-block"><span>Active project</span><strong>{project?.name || 'None selected'}</strong><small>{project?.indexed_at ? `Indexed ${new Date(project.indexed_at).toLocaleString()}` : 'Not indexed yet'}</small></div><div className="context-block"><span>Resource profile</span><strong>{hardware?.profile || 'Checking'} mode</strong><div className="meter"><i style={{ width: `${hardware?.ram.percent || 0}%` }}/></div><small>{hardware ? `${hardware.ram.available_gb} GB RAM available` : 'Reading local hardware'}</small></div><div className="context-block"><span>Model runtime</span><strong>{ollama?.available ? 'Ollama connected' : 'Mock fallback'}</strong><small>{ollama?.available ? `${ollama.models.length} model(s) installed` : 'Core remains testable without weights'}</small></div><div className="context-block"><span>Safety policy</span><ul><li>One heavy engine at a time</li><li>Write through approval only</li><li>Automatic file backup</li><li>1.5 GB RAM guard</li></ul></div></aside>
+}
+
+function SettingsModal({ projects, hardware, ollama, onClose, onChanged }: { projects: Project[]; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onClose: () => void; onChanged: () => Promise<void> }) {
+  const [name, setName] = useState('Synthetic demo'); const [path, setPath] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
+  async function addProject(e: React.FormEvent) { e.preventDefault(); setSaving(true); setError(''); try { await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('') } catch (err) { setError(err instanceof Error ? err.message : 'Unable to add project') } finally { setSaving(false) } }
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <p className="form-error">{error}</p>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available && <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div>}</section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+}
+
+function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) { return <nav className="mobile-nav">{nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={18}/><span>{item.label}</span></button> })}</nav> }
+function formatBytes(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB` }

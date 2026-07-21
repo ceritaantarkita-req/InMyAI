@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem without private project data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: OS and RAM
+  - type: input
+    attributes:
+      label: InMyAI commit/version
+  - type: dropdown
+    attributes:
+      label: Provider
+      options: [Safe Mock, Ollama, Tesseract, ComfyUI, Diffusers, Other]

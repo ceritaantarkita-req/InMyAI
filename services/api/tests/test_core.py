@@ -8,8 +8,10 @@ from PIL import Image, ImageDraw
 
 from services.api.app.config import settings
 from services.api.app.database import migrate
+from services.api.app.indexer import index_project
 from services.api.app.main import app
 from services.api.app.providers import choose_ollama_model
+from services.api.app.services import build_context
 from services.api.app.image_provider import replace_placeholders, find_first_image
 
 
@@ -147,3 +149,34 @@ def test_comfyui_workflow_helpers() -> None:
     assert replaced['6']['inputs']['seed'] == '42'
     history = {'outputs': {'9': {'images': [{'filename': 'out.png', 'type': 'output'}]}}}
     assert find_first_image(history)['filename'] == 'out.png'
+
+
+def test_build_context_locates_relevant_excerpt_not_file_start() -> None:
+    """When FTS finds a file, the excerpt must locate the matching token,
+    not blindly slice from the file's first character.
+
+    Regression: build_context used `content.find(query)` on the full multi-word
+    query, which returns -1 almost always (a natural-language question is not a
+    verbatim substring of file content), so the excerpt always started at 0.
+    """
+    project = create_demo_project()
+    # The matching marker sits well past the first 2500 chars so a bug that
+    # always slices content[0:2500] would miss it entirely.
+    marker = 'ZIRCONIUM_GATEWAY_DECISION'
+    filler = ('lorem ipsum dolor sit amet. ' * 150)  # ~3600 chars of filler
+    notes_path = settings.workspace_root / 'demo' / 'deep_notes.md'
+    notes_path.write_text(
+        f'# Deep notes\n\n{filler}\n\nThe active marker is {marker}.\n',
+        encoding='utf-8'
+    )
+    index_project(project['id'], settings.workspace_root / 'demo')
+    # A natural-language question: FTS still finds the file via the token, but
+    # the full string is NOT a verbatim substring, so the old `.find()` hits -1.
+    context, citations = build_context(
+        project['id'], 'what is the zirconium gateway decision about?', max_chars=6000
+    )
+    assert citations, 'FTS should find the file containing the marker'
+    assert marker in context, (
+        'Excerpt must locate the matching token in the file body, '
+        'not return the file head. Got excerpt missing the marker.'
+    )

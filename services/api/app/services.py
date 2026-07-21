@@ -75,6 +75,27 @@ def _fts_query(query: str) -> str:
     return ' OR '.join(f'"{token}"' for token in tokens[:12]) or '""'
 
 
+def _locate_excerpt(content: str, query: str) -> int:
+    """Best-effort character index of the most relevant excerpt in `content`.
+
+    A natural-language query (e.g. "what database does this use?") is rarely a
+    verbatim substring of file content, so a naive `content.find(query)` returns
+    -1 and the excerpt collapses to the file head. We instead try, in order:
+    the full phrase, then the first query token that actually occurs.
+    """
+    lowered = content.lower()
+    exact = lowered.find(query.lower())
+    if exact >= 0:
+        return exact
+    for token in re.findall(r'[\w\-]+', query, flags=re.UNICODE):
+        if len(token) < 3:
+            continue
+        hit = lowered.find(token.lower())
+        if hit >= 0:
+            return hit
+    return 0
+
+
 def search_project(project_id: int, query: str, limit: int = 8) -> list[dict]:
     fts = _fts_query(query)
     if not fts or fts == '""':
@@ -155,8 +176,8 @@ def build_context(project_id: int, query: str, max_chars: int = 12000) -> tuple[
                 row = conn.execute('SELECT content FROM files WHERE id=?', (item['file_id'],)).fetchone()
                 if row:
                     content = row['content']
-                    index = max(content.lower().find(query.lower()), 0)
-                    excerpt = content[max(0, index - 500): index + 2500]
+                    index = _locate_excerpt(content, query)
+                    excerpt = content[index - 500: index + 2500]
                     file_sections.append(f"SOURCE {item['relative_path']}:\n{excerpt}")
         sections.append('RELEVANT FILES:\n' + '\n\n'.join(file_sections))
     text = '\n\n'.join(sections)

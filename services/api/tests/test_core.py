@@ -11,7 +11,7 @@ from services.api.app.database import migrate
 from services.api.app.indexer import index_project
 from services.api.app.main import app
 from services.api.app.providers import choose_ollama_model
-from services.api.app.services import build_context
+from services.api.app.services import build_context, extract_file_reference
 from services.api.app.image_provider import replace_placeholders, find_first_image
 
 
@@ -180,3 +180,61 @@ def test_build_context_locates_relevant_excerpt_not_file_start() -> None:
         'Excerpt must locate the matching token in the file body, '
         'not return the file head. Got excerpt missing the marker.'
     )
+
+
+def test_extract_file_reference_finds_supported_path() -> None:
+    assert extract_file_reference('please OCR invoice.png') == 'invoice.png'
+    assert extract_file_reference('scan src/scan.pdf for me') == 'src/scan.pdf'
+    assert extract_file_reference('look at IMG_001.JPG') == 'IMG_001.JPG'
+    assert extract_file_reference('no file mentioned here') is None
+
+
+def test_chat_dispatches_ocr_when_path_present() -> None:
+    """A chat message that names an indexed image must run the OCR tool, not Mock."""
+    project = create_demo_project()
+    response = client.post('/api/chat', json={
+        'project_id': project['id'], 'message': 'ocr invoice.png', 'provider': 'auto'
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['provider'] == 'local-tool', body
+    assert body['route']['engine'] == 'tesseract'
+    assert 'INVOICE' in body['answer'].upper(), body['answer']
+
+
+def test_chat_ocr_without_path_returns_guidance() -> None:
+    """OCR intent without a file path must stay local-tool and guide the user."""
+    project = create_demo_project()
+    response = client.post('/api/chat', json={
+        'project_id': project['id'], 'message': 'ocr this document', 'provider': 'auto'
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['provider'] == 'local-tool', body
+    # Must point the user at how to specify a file, not silently mock.
+    assert 'file' in body['answer'].lower() or 'studio' in body['answer'].lower(), body['answer']
+
+
+def test_chat_ocr_missing_file_is_graceful() -> None:
+    """A named-but-absent file must not 500; it returns local-tool guidance."""
+    project = create_demo_project()
+    response = client.post('/api/chat', json={
+        'project_id': project['id'], 'message': 'ocr doesnotexist.png', 'provider': 'auto'
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['provider'] == 'local-tool', body
+    assert 'doesnotexist.png' in body['answer'], body['answer']
+
+
+def test_chat_diff_task_returns_guidance_not_mock() -> None:
+    """Diff/image tool tasks must surface honest guidance, not run the Mock LLM."""
+    project = create_demo_project()
+    response = client.post('/api/chat', json={
+        'project_id': project['id'], 'message': 'diff these two files for me', 'provider': 'auto'
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['provider'] == 'local-tool', body
+    assert body['provider'] != 'mock'
+    assert 'file' in body['answer'].lower(), body['answer']

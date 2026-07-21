@@ -96,6 +96,24 @@ def _locate_excerpt(content: str, query: str) -> int:
     return 0
 
 
+# File-name pattern referenced inside a natural-language chat message, so the
+# OCR tool can be dispatched from chat. Supports nested relative paths.
+_FILE_REFERENCE_RE = re.compile(
+    r'(?:[\w\-./\\]+\.(?:png|jpe?g|webp|bmp|tiff|pdf))',
+    re.IGNORECASE,
+)
+
+
+def extract_file_reference(message: str) -> str | None:
+    """Return the first supported file path mentioned in a chat message, or None.
+
+    Used to dispatch deterministic tools (currently OCR) directly from chat
+    instead of silently routing the request to the LLM.
+    """
+    match = _FILE_REFERENCE_RE.search(message)
+    return match.group(0) if match else None
+
+
 def search_project(project_id: int, query: str, limit: int = 8) -> list[dict]:
     fts = _fts_query(query)
     if not fts or fts == '""':

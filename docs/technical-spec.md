@@ -54,12 +54,20 @@ SQLite FTS5 with BM25 ordering. The query is tokenized and safely quoted before 
 
 ## Graph
 
-P0 extracts:
+Relations are extracted from real syntax trees via tree-sitter for:
+Python, JavaScript/JSX, TypeScript/TSX, Go, Rust, PHP, Java, C, and C++.
 
-- file imports
-- functions/classes/interfaces/types defined by source files
+For each file the extractor records:
 
-Every built-in edge is tagged `EXTRACTED`. Graphify integration is documented as an additional graph source.
+- imports (module specifiers / `#include` / `use` / `import`)
+- definitions (functions, classes, interfaces, types, structs)
+- calls (JS/TS/Python only)
+
+Languages without a grammar (Ruby, Swift, Kotlin, C#, Markdown, JSON, ...)
+produce no relation rows rather than pseudo-relations from fragile regex.
+
+Every built-in edge is tagged `EXTRACTED`. Graphify edges are tagged
+`INFERRED` (see `scripts/import_graphify.py`).
 
 ## Memory budget
 

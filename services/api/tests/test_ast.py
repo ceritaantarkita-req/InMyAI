@@ -23,7 +23,8 @@ def test_language_for_suffix_maps_known_languages() -> None:
 
 
 def test_language_for_suffix_returns_none_for_unsupported() -> None:
-    assert language_for_suffix('.go') is None
+    assert language_for_suffix('.rb') is None
+    assert language_for_suffix('.swift') is None
     assert language_for_suffix('.json') is None
     assert language_for_suffix('.md') is None
     assert language_for_suffix('') is None
@@ -151,3 +152,104 @@ def test_relations_carry_evidence_and_extracted_confidence() -> None:
     relation, target, evidence, confidence = rows[0]
     assert confidence == 'EXTRACTED'
     assert 'import' in evidence  # evidence contains the source snippet
+
+
+# ---------- Go ----------
+
+def test_go_extracts_imports_and_definitions() -> None:
+    rows = extract_relations_ast(
+        'main.go',
+        'package main\nimport "fmt"\nimport (\n  "os"\n)\nfunc Foo() {}\ntype Bar struct{}\n',
+        'go',
+    )
+    pairs = rel_pairs(rows)
+    assert ('imports', 'fmt') in pairs
+    assert ('imports', 'os') in pairs
+    assert ('defines', 'Foo') in pairs
+    assert ('defines', 'Bar') in pairs
+
+
+# ---------- Rust ----------
+
+def test_rust_extracts_use_and_definitions() -> None:
+    rows = extract_relations_ast(
+        'lib.rs',
+        'use std::io;\nuse foo::bar;\nfn my_func() {}\nstruct MyStruct {}\n',
+        'rust',
+    )
+    pairs = rel_pairs(rows)
+    assert ('imports', 'std::io') in pairs
+    assert ('imports', 'foo::bar') in pairs
+    assert ('defines', 'my_func') in pairs
+    assert ('defines', 'MyStruct') in pairs
+
+
+# ---------- PHP ----------
+
+def test_php_extracts_use_and_definitions() -> None:
+    rows = extract_relations_ast(
+        'app.php',
+        '<?php\nuse App\\Foo;\nfunction baz() {}\nclass C {}\n',
+        'php',
+    )
+    pairs = rel_pairs(rows)
+    # PHP namespaces use backslash; the extracted target keeps it as written.
+    php_imports = {t for r, t in pairs if r == 'imports'}
+    assert any('Foo' in t for t in php_imports), pairs
+    assert ('defines', 'baz') in pairs
+    assert ('defines', 'C') in pairs
+
+
+# ---------- Java ----------
+
+def test_java_extracts_imports_and_definitions() -> None:
+    rows = extract_relations_ast(
+        'Main.java',
+        'package com.x;\nimport java.util.List;\npublic class C { void m() {} }\n',
+        'java',
+    )
+    pairs = rel_pairs(rows)
+    assert ('imports', 'java.util.List') in pairs
+    assert ('defines', 'C') in pairs
+    assert ('defines', 'm') in pairs
+
+
+# ---------- C ----------
+
+def test_c_extracts_includes_and_definitions() -> None:
+    rows = extract_relations_ast(
+        'main.c',
+        '#include <stdio.h>\n#include "local.h"\nint main() {}\ntypedef int MyInt;\n',
+        'c',
+    )
+    pairs = rel_pairs(rows)
+    assert ('imports', 'stdio.h') in pairs
+    assert ('imports', 'local.h') in pairs
+    assert ('defines', 'main') in pairs
+    assert ('defines', 'MyInt') in pairs
+
+
+# ---------- C++ ----------
+
+def test_cpp_extracts_includes_and_class_definitions() -> None:
+    rows = extract_relations_ast(
+        'main.cpp',
+        '#include <iostream>\nnamespace ns { class Widget { public: void run() {} }; }\n',
+        'cpp',
+    )
+    pairs = rel_pairs(rows)
+    assert ('imports', 'iostream') in pairs
+    assert ('defines', 'Widget') in pairs
+
+
+# ---------- language_for_suffix coverage for new langs ----------
+
+def test_language_for_suffix_maps_new_languages() -> None:
+    assert language_for_suffix('.go') == 'go'
+    assert language_for_suffix('.rs') == 'rust'
+    assert language_for_suffix('.php') == 'php'
+    assert language_for_suffix('.java') == 'java'
+    assert language_for_suffix('.c') == 'c'
+    assert language_for_suffix('.h') == 'c'
+    assert language_for_suffix('.cpp') == 'cpp'
+    assert language_for_suffix('.hpp') == 'cpp'

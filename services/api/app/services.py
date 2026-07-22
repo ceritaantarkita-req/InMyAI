@@ -227,6 +227,88 @@ def graph_query(project_id: int, node: str) -> dict:
     return {'matches': matches[:20], 'selected': selected, 'neighbors': neighbors[:100]}
 
 
+# ---- Graphify importer ----
+#
+# Maps a Graphify graph.json into the relations table. Graphify is a graph-
+# memory SOURCE: its edges supplement (do not replace) the deterministic
+# EXTRACTED relations produced by indexing. Imported edges are tagged
+# confidence='INFERRED' so callers can tell provenance apart.
+
+_RELATION_KEYS = ('relation', 'type', 'label', 'kind', 'relationship')
+_EDGE_SOURCE_KEYS = ('source', 'from', 'src', 'start')
+_EDGE_TARGET_KEYS = ('target', 'to', 'dst', 'end')
+
+
+def map_graphify_edge(edge: dict) -> tuple[str, str, str, str] | None:
+    """Normalize one Graphify edge into a relations row, or None if unusable.
+
+    Returns (source_node, relation, target_node, evidence). Tolerates the
+    common key variants Graphify emits across versions.
+    """
+    if not isinstance(edge, dict):
+        return None
+    source = next((str(edge[k]) for k in _EDGE_SOURCE_KEYS if edge.get(k)), '')
+    target = next((str(edge[k]) for k in _EDGE_TARGET_KEYS if edge.get(k)), '')
+    if not source or not target:
+        return None
+    relation = next((str(edge[k]) for k in _RELATION_KEYS if edge.get(k)), 'related') or 'related'
+    evidence = str(edge.get('evidence') or edge.get('detail') or '')
+    return source, relation, target, evidence[:300]
+
+
+def _normalize_graphify_payload(data: dict) -> tuple[list, list]:
+    """Defensive unwrap of Graphify graph.json node/edge containers.
+
+    Tolerates a top-level 'graph' wrapper and nodes being either a list or an
+    id-keyed dict. Edges may live under 'edges' or 'links'.
+    """
+    graph = data.get('graph') if isinstance(data.get('graph'), dict) else data
+    nodes = graph.get('nodes') or data.get('nodes') or []
+    if isinstance(nodes, dict):
+        nodes = [{'id': key, **(val if isinstance(val, dict) else {})} for key, val in nodes.items()]
+    edges = graph.get('links') or graph.get('edges') or data.get('links') or data.get('edges') or []
+    return list(nodes), list(edges)
+
+
+def import_graphify(project_id: int, graph_data: dict) -> dict:
+    """Import a Graphify graph.json into the relations table.
+
+    Each edge becomes a row tagged confidence='INFERRED'. Re-imports are
+    idempotent via the UNIQUE(project_id, source_node, relation, target_node)
+    constraint (INSERT OR IGNORE). Returns counts only — graph contents are
+    never echoed to protect private project knowledge.
+
+    Raises KeyError if the project does not exist.
+    """
+    # Validate the project exists (raises KeyError naturally).
+    get_project(project_id)
+
+    nodes, edges = _normalize_graphify_payload(graph_data)
+    now = utc_now()
+    imported = 0
+    skipped = 0
+    with transaction() as conn:
+        for edge in edges:
+            mapped = map_graphify_edge(edge)
+            if mapped is None:
+                skipped += 1
+                continue
+            source_node, relation, target_node, evidence = mapped
+            cur = conn.execute(
+                '''INSERT OR IGNORE INTO relations(project_id,source_node,relation,target_node,evidence,confidence)
+                   VALUES(?,?,?,?,?,?)''',
+                (project_id, source_node, relation, target_node, evidence, 'INFERRED')
+            )
+            if cur.rowcount:
+                imported += 1
+        # Audit log records only counts (privacy: no node/edge identifiers).
+        conn.execute(
+            'INSERT INTO audit_log(project_id,action,detail,created_at) VALUES(?,?,?,?)',
+            (project_id, 'graph.imported', f'nodes={len(nodes)},edges={len(edges)},imported={imported},skipped={skipped}', now)
+        )
+    return {'nodes': len(nodes), 'edges': len(edges), 'imported': imported, 'skipped': skipped}
+
+
 def create_write_proposal(project_id: int, relative_path: str, proposed_content: str) -> dict:
     project = get_project(project_id)
     root = Path(project['path'])

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     workspace_root: Path = Path('./workspace')
     allow_any_local_path: bool = False
     allowed_roots: str = ''
-    max_file_mb: int = 2
+    max_file_mb: int = 8
     max_index_files: int = 5000
     provider: str = 'mock'
     ollama_base_url: str = 'http://127.0.0.1:11434'

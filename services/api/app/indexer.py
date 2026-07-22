@@ -14,7 +14,8 @@ from .database import transaction, utc_now
 TEXT_EXTENSIONS = {
     '.md', '.txt', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.ini', '.env.example',
     '.py', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.sql', '.sh', '.ps1',
-    '.go', '.rs', '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.kt'
+    '.go', '.rs', '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.kt',
+    '.docx', '.xlsx',
 }
 SKIP_DIRS = {
     '.git', '.next', 'node_modules', 'dist', 'build', 'coverage', '.venv', 'venv',
@@ -27,9 +28,12 @@ def _sha256(data: bytes) -> str:
 
 
 def _read_text(path: Path) -> str:
-    if path.suffix.lower() == '.pdf':
+    suffix = path.suffix.lower()
+    if suffix == '.pdf':
         reader = PdfReader(str(path))
         return '\n\n'.join(page.extract_text() or '' for page in reader.pages)
+    if suffix in {'.docx', '.xlsx'}:
+        return _read_office(path, suffix)
     data = path.read_bytes()
     if b'\x00' in data[:4096]:
         return ''
@@ -39,6 +43,35 @@ def _read_text(path: Path) -> str:
         except UnicodeDecodeError:
             continue
     return ''
+
+
+def _read_office(path: Path, suffix: str) -> str:
+    """Extract plain text from .docx / .xlsx (both are ZIP-based OOXML).
+
+    Raises on a corrupt/non-OOXML file so the indexer records it in the per-file
+    errors list instead of silently producing empty content.
+    """
+    if suffix == '.docx':
+        from docx import Document
+        doc = Document(str(path))
+        parts: list[str] = [p.text for p in doc.paragraphs if p.text]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text for c in row.cells if c.text]
+                if cells:
+                    parts.append('\t'.join(cells))
+        return '\n'.join(parts)
+    # suffix == '.xlsx'
+    import openpyxl
+    wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    chunks: list[str] = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c) for c in row if c is not None and str(c).strip()]
+            if cells:
+                chunks.append('\t'.join(cells))
+    wb.close()
+    return '\n'.join(chunks)
 
 
 def iter_indexable_files(root: Path) -> Iterable[Path]:

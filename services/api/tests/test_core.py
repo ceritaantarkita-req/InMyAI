@@ -8,6 +8,7 @@ from services.api.app.config import settings
 from services.api.app.indexer import index_project
 from services.api.app.main import app
 from services.api.app.providers import choose_ollama_model
+from services.api.app import services
 from services.api.app.services import build_context, extract_file_reference
 from services.api.app.image_provider import replace_placeholders, find_first_image
 
@@ -94,6 +95,46 @@ def test_ocr_and_image_simulator() -> None:
     assert image.status_code == 200, image.text
     assert Path(image.json()['path']).exists()
     assert 'Not an AI-generated image' in image.json()['notice']
+
+
+def test_image_request_accepts_diffusers_provider() -> None:
+    # Schema must allow 'diffusers' as a provider (not 422).
+    project = create_demo_project()
+    # Use simulator-equivalent call shape but with provider='diffusers'; we
+    # only validate schema acceptance here, not execution (execution path is
+    # tested separately by the not-installed error test below).
+    response = client.post('/api/images/generate', json={
+        'project_id': project['id'], 'prompt': 'navy industrial coverall',
+        'width': 512, 'height': 512, 'provider': 'diffusers'
+    })
+    # Must NOT be a 422 validation rejection (that would mean the Literal
+    # doesn't include 'diffusers'). Either 200 (if torch installed) or 400
+    # (plugin-not-installed) is acceptable for this schema test.
+    assert response.status_code != 422, response.text
+
+
+def test_image_diffusers_not_installed_returns_helpful_error() -> None:
+    # When torch/diffusers are not installed, the API must surface a clear 400
+    # pointing the user at requirements-image.txt — not a 500, not a silent
+    # ComfyUI fallthrough.
+    import importlib.util
+    if importlib.util.find_spec('torch') is not None:
+        import pytest
+        pytest.skip('torch is installed in this environment; error-path test is N/A')
+    # The RAM guard (1.5 GB available) runs before provider dispatch and blocks
+    # ALL image requests when low. This test only checks the diffusers error
+    # path, so skip when the guard would mask it.
+    if not services.hardware_snapshot()['guard']['allow_new_engine']:
+        import pytest
+        pytest.skip('available RAM below the 1.5 GB guard; diffusers error path is masked')
+    project = create_demo_project()
+    response = client.post('/api/images/generate', json={
+        'project_id': project['id'], 'prompt': 'navy industrial coverall',
+        'width': 512, 'height': 512, 'provider': 'diffusers'
+    })
+    assert response.status_code == 400, response.text
+    detail = response.json()['detail'].lower()
+    assert 'diffusers' in detail or 'requirements-image' in detail, response.text
 
 
 def test_chat_safe_mock_and_citations() -> None:

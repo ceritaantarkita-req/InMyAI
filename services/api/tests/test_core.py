@@ -1,38 +1,15 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from PIL import Image, ImageDraw
 
 from services.api.app.config import settings
-from services.api.app.database import migrate
 from services.api.app.indexer import index_project
 from services.api.app.main import app
 from services.api.app.providers import choose_ollama_model
 from services.api.app.services import build_context, extract_file_reference
 from services.api.app.image_provider import replace_placeholders, find_first_image
-
-
-def setup_module() -> None:
-    root = Path('/tmp/inmyai-tests')
-    if root.exists():
-        import shutil
-        shutil.rmtree(root)
-    settings.data_dir = root / 'data'
-    settings.workspace_root = root / 'workspace'
-    settings.allow_any_local_path = False
-    settings.ensure_dirs()
-    project = settings.workspace_root / 'demo'
-    project.mkdir(parents=True)
-    (project / 'README.md').write_text('# Demo\n\nThe active database is SQLite.\n', encoding='utf-8')
-    (project / 'main.ts').write_text("import { login } from './auth'\nexport function run(){ return login() }\n", encoding='utf-8')
-    (project / 'auth.ts').write_text('export function login(){ return true }\n', encoding='utf-8')
-    image = Image.new('RGB', (500, 160), 'white')
-    ImageDraw.Draw(image).text((20, 50), 'INVOICE 2026 TEST', fill='black')
-    image.save(project / 'invoice.png')
-    migrate()
 
 
 client = TestClient(app)

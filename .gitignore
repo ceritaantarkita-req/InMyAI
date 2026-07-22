@@ -27,3 +27,6 @@ artifacts/
 graphify-out/
 .DS_Store
 Thumbs.db
+
+# Test runtime isolation (per-session temp DB + workspace)
+.test-runtime/

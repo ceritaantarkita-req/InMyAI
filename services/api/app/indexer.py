@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Iterable
 
 from pypdf import PdfReader
 
+from .ast_extractor import extract_relations_ast, language_for_suffix
 from .config import settings
 from .database import transaction, utc_now
 
@@ -60,21 +60,22 @@ def iter_indexable_files(root: Path) -> Iterable[Path]:
 
 
 def _extract_relations(project_id: int, relative: str, content: str) -> list[tuple]:
-    rows: list[tuple] = []
-    source = relative
-    import_patterns = [
-        r"(?:from\s+['\"]([^'\"]+)['\"]|import\s+.+?\s+from\s+['\"]([^'\"]+)['\"])",
-        r"from\s+([\w\.]+)\s+import",
-        r"import\s+([\w\.]+)"
+    """Build relations table rows for a file via tree-sitter AST extraction.
+
+    Returns 6-tuples (project_id, source_node, relation, target_node, evidence,
+    confidence) ready for INSERT OR IGNORE. Files in languages without a
+    tree-sitter grammar (Go, Rust, Markdown, JSON, ...) produce no rows — we no
+    longer pretend to extract relations from them with fragile regex.
+    """
+    suffix = Path(relative).suffix.lower()
+    language = language_for_suffix(suffix)
+    if language is None:
+        return []
+    ast_rows = extract_relations_ast(relative, content, language)
+    return [
+        (project_id, relative, relation, target_node, evidence, confidence)
+        for relation, target_node, evidence, confidence in ast_rows
     ]
-    for pattern in import_patterns:
-        for match in re.finditer(pattern, content):
-            target = next((g for g in match.groups() if g), '')
-            if target:
-                rows.append((project_id, source, 'imports', target, match.group(0)[:300], 'EXTRACTED'))
-    for match in re.finditer(r'^(?:export\s+)?(?:async\s+)?(?:function|class|interface|type)\s+([A-Za-z_][A-Za-z0-9_]*)', content, re.M):
-        rows.append((project_id, source, 'defines', match.group(1), match.group(0), 'EXTRACTED'))
-    return rows
 
 
 def index_project(project_id: int, root: Path) -> dict:

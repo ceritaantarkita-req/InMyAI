@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from .config import settings
+from .model_registry import get_registry, select_by_name_heuristic
 
 
 @dataclass
@@ -63,27 +64,29 @@ class OllamaProvider:
 
 
 def choose_ollama_model(task: str, models: list[dict[str, Any]], requested: str | None = None) -> str:
+    """Select an installed Ollama model for a task.
+
+    Prefers a verified/measured profile from the model registry
+    (models/registry.json) that matches the task, the current hardware profile,
+    and an installed model. Falls back to the name-heuristic, then the
+    configured default.
+    """
+    import psutil
+
     names = [str(item.get('name') or item.get('model') or '') for item in models]
     if requested and requested in names:
         return requested
-    preferences = {
-        'coding': ('coder', 'code', 'devstral', 'starcoder'),
-        'graph': ('gemma', 'qwen', 'nemotron', 'phi', 'llama'),
-        'memory': ('gemma', 'qwen', 'nemotron', 'phi', 'llama'),
-        'general': ('gemma', 'qwen', 'nemotron', 'phi', 'llama')
-    }
-    tokens = preferences.get(task, preferences['general'])
-    candidates = []
-    for item in models:
-        name = str(item.get('name') or item.get('model') or '')
-        size = int(item.get('size') or 0)
-        rank = next((index for index, token in enumerate(tokens) if token in name.lower()), len(tokens))
-        candidates.append((rank, size or 10**18, name))
-    candidates = [item for item in candidates if item[2]]
-    if candidates:
-        candidates.sort()
-        return candidates[0][2]
-    return requested or settings.ollama_model
+
+    total_gb = psutil.virtual_memory().total / (1024 ** 3)
+    hardware_profile = 'lite' if total_gb < 12 else 'standard'
+    registry = get_registry()
+
+    from .model_registry import select_model
+    return select_model(task, hardware_profile, models, requested, registry)
+
+
+# Backwards-compat export: callers that imported the heuristic directly keep working.
+_name_heuristic = select_by_name_heuristic
 
 
 async def get_ollama_status() -> dict:

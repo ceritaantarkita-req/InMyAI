@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "general-small",
+      "runtime": "ollama",
+      "model": "gemma3:4b",
+      "task_types": ["general", "memory", "graph"],
+      "hardware_profile": "standard",
+      "peak_ram_mb": 3000,
+      "verified": false,
+      "notes": "Shipped default. Measure peak RAM, latency, and quality on your hardware before marking verified."
+    },
+    {
+      "id": "coding-small",
+      "runtime": "ollama",
+      "model": "qwen2.5-coder:3b",
+      "task_types": ["coding"],
+      "hardware_profile": "standard",
+      "peak_ram_mb": 2000,
+      "verified": false,
+      "notes": "Shipped default. Model availability and license must be checked by the user."
+    },
+    {
+      "id": "general-tiny",
+      "runtime": "ollama",
+      "model": "gemma3:1b",
+      "task_types": ["general", "memory", "graph"],
+      "hardware_profile": "lite",
+      "peak_ram_mb": 1200,
+      "verified": false,
+      "notes": "Suggested starting point for 8 GB devices. Untuned example; benchmark before trusting."
+    },
+    {
+      "id": "coding-tiny",
+      "runtime": "ollama",
+      "model": "qwen2.5-coder:1.5b",
+      "task_types": ["coding"],
+      "hardware_profile": "lite",
+      "peak_ram_mb": 1100,
+      "verified": false,
+      "notes": "Suggested starting point for 8 GB devices. Untuned example; benchmark before trusting."
+    }
+  ]
+}

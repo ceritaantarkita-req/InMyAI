@@ -13,7 +13,10 @@ __pycache__/
 *.safetensors
 *.ckpt
 *.bin
-models/
+models/*
+!models/registry.json
+!models/registry.example.json
+!models/.gitkeep
 downloads/
 workspace/
 data/runtime/

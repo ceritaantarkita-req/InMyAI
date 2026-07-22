@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "general-small",
+      "runtime": "ollama",
+      "model": "gemma3:4b",
+      "task_types": ["general", "memory", "graph"],
+      "hardware_profile": "standard",
+      "verified": false,
+      "notes": "Example only. Measure peak RAM, latency, and quality before marking verified."
+    },
+    {
+      "id": "coding-small",
+      "runtime": "ollama",
+      "model": "qwen2.5-coder:3b",
+      "task_types": ["coding"],
+      "hardware_profile": "standard",
+      "verified": false,
+      "notes": "Example only. Model availability and license must be checked by the user."
+    }
+  ]
+}

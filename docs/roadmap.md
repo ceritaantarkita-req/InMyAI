@@ -7,15 +7,16 @@ Core local workspace, project indexing, FTS5 retrieval, memory, decision ledger,
 ## P1
 
 - Tauri desktop shell and native folder picker
-- Graphify importer
+- ~~Graphify importer~~ ✓ implemented (CLI: `scripts/import_graphify.py`)
 - language-server and Git tools
 - terminal approval sandbox
-- model benchmark registry
+- ~~model benchmark registry~~ ✓ implemented (`models/registry.json` + `model_registry.py`); shipped profiles are `verified: false` pending user benchmarks
 - model load/unload lifecycle hooks
 - semantic embedding plugin
 - DOCX/XLSX parsers
 - Indonesian localization
 - ComfyUI executor
+- AST-based graph extraction (tree-sitter for Python/JS/TS, replacing regex) ✓ implemented (`ast_extractor.py`)
 
 ## P2
 

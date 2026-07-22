@@ -21,9 +21,23 @@ graphify-out/
 
 `graphify-out/` is ignored by Git because it may contain private project knowledge.
 
+## Importer
+
+The CLI importer maps a Graphify graph.json into InMyAI's `relations` table:
+
+```bash
+python scripts/import_graphify.py graphify-out/graph.json --project 3
+```
+
+Edges are inserted with `confidence='INFERRED'` so Graphify provenance stays
+distinct from the deterministic `EXTRACTED` relations produced by indexing.
+The import is idempotent: re-running on the same graph adds no duplicate rows.
+Aggregate counts are printed and recorded in the audit log; graph node/edge
+identifiers are never echoed (they may be private project knowledge).
+
 ## Integration contract
 
-P1 importer maps Graphify nodes and edges into InMyAI's `relations` table while preserving:
+The importer maps Graphify nodes and edges into InMyAI's `relations` table while preserving:
 
 - source node
 - relationship

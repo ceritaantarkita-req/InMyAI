@@ -36,3 +36,40 @@ export type OnboardingState = {
   hardware_profile: string
   recommended: ModelRecommendation[]
 }
+export type Agent = {
+  id: number
+  project_id: number
+  slug: string
+  name: string
+  role: string
+  provider: string
+  model: string
+  tools_json: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+export type Task = {
+  id: number
+  project_id: number
+  title: string
+  status: string
+  instruction: string
+  provider: string
+  plan_json: string
+  result_text: string
+  verification_json: string
+  artifact_path: string | null
+  created_at: string
+  updated_at: string
+}
+export type AgentEvent = {
+  id: number
+  task_id: number
+  agent_id: number | null
+  state: string
+  message: string
+  data_json: string
+  created_at: string
+}
+export type TaskDetail = { task: Task; events: AgentEvent[] }

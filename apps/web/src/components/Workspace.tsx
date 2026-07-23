@@ -5,15 +5,16 @@ import type { CSSProperties } from 'react'
 import {
   Bot, BrainCircuit, Check, Code2, Copy, Download, ExternalLink, FileCode2,
   FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop, Loader2,
-  MemoryStick, MessageSquareText, Network, Plus, RefreshCw, Save, Search,
-  Send, Settings, ShieldCheck, Sparkles, TerminalSquare, X
+  MemoryStick, MessageSquareText, Network, PlayCircle, Plus, RefreshCw, Save,
+  Search, Send, Settings, ShieldCheck, Sparkles, StopCircle, TerminalSquare,
+  Users, Workflow, X
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
-import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation } from '@/lib/types'
+import type { Agent, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
-type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git'
+type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
 
 const nav: { id: View; label: string; icon: typeof Bot }[] = [
@@ -22,7 +23,8 @@ const nav: { id: View; label: string; icon: typeof Bot }[] = [
   { id: 'memory', label: 'Memory', icon: BrainCircuit },
   { id: 'graph', label: 'Graph', icon: Network },
   { id: 'studio', label: 'Studio', icon: Sparkles },
-  { id: 'git', label: 'Git', icon: GitBranch }
+  { id: 'git', label: 'Git', icon: GitBranch },
+  { id: 'agents', label: 'Agents', icon: Workflow }
 ]
 
 export function Workspace() {
@@ -117,6 +119,7 @@ export function Workspace() {
             {view === 'graph' && <GraphView project={project}/>}
             {view === 'studio' && <StudioView project={project}/>}
             {view === 'git' && <GitView project={project}/>}
+            {view === 'agents' && <AgentsView project={project}/>}
           </div>
         )}
       </section>
@@ -363,6 +366,171 @@ function GitView({ project }: { project: Project }) {
       <div className="safety-box"><ShieldCheck size={18}/><div><strong>Read-only</strong><p>Git tools inspect the repository only. No commits, pushes, or branch changes are made through InMyAI.</p></div></div>
     </aside>
   </div>
+}
+
+const TERMINAL_TASK_STATES = new Set(['completed', 'failed', 'cancelled'])
+
+function taskStatusClass(status: string) {
+  if (status === 'completed') return 'applied'
+  if (status === 'failed' || status === 'cancelled') return 'rejected'
+  return 'pending'
+}
+
+function AgentsView({ project }: { project: Project }) {
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
+  const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [title, setTitle] = useState('')
+  const [instruction, setInstruction] = useState('')
+  const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama'>('auto')
+  const [creating, setCreating] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    const [agentData, taskData] = await Promise.all([
+      api<Agent[]>(`/api/projects/${project.id}/agents`),
+      api<Task[]>(`/api/projects/${project.id}/tasks`)
+    ])
+    setAgents(agentData)
+    setTasks(taskData)
+  }, [project.id])
+  useEffect(() => { void load() }, [load])
+
+  const loadDetail = useCallback(async (taskId: number) => {
+    try {
+      const result = await api<TaskDetail>(`/api/tasks/${taskId}`)
+      setDetail(result)
+    } catch {
+      // Task may have disappeared (e.g. a different project was selected mid-poll).
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedTaskId) void loadDetail(selectedTaskId)
+    else setDetail(null)
+  }, [selectedTaskId, loadDetail])
+
+  // Poll the open task's checkpoint timeline while it is still in flight, so
+  // the Coordinator/Researcher/Worker/Verifier handoffs update live instead
+  // of requiring a manual refresh.
+  useEffect(() => {
+    if (!selectedTaskId || !detail || TERMINAL_TASK_STATES.has(detail.task.status)) return
+    const timer = setInterval(() => { void loadDetail(selectedTaskId) }, 2000)
+    return () => clearInterval(timer)
+  }, [selectedTaskId, detail, loadDetail])
+
+  async function createTask(event: React.FormEvent) {
+    event.preventDefault()
+    if (!title.trim() || !instruction.trim() || creating) return
+    setCreating(true); setError('')
+    try {
+      const task = await api<Task>('/api/tasks', { method: 'POST', body: JSON.stringify({ project_id: project.id, title, instruction, provider }) })
+      setTitle(''); setInstruction('')
+      await load()
+      setSelectedTaskId(task.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to queue task.')
+    } finally { setCreating(false) }
+  }
+
+  async function runSelected() {
+    if (!selectedTaskId || running) return
+    setRunning(true); setError('')
+    try {
+      await api(`/api/tasks/${selectedTaskId}/run`, { method: 'POST' })
+    } catch (err) {
+      // A failed run is still checkpointed as a 'failed' event server-side —
+      // surface the message but keep refreshing so the timeline shows why.
+      setError(err instanceof Error ? err.message : 'Task run failed.')
+    } finally {
+      await Promise.all([loadDetail(selectedTaskId), load()])
+      setRunning(false)
+    }
+  }
+
+  async function cancelSelected() {
+    if (!selectedTaskId) return
+    await api(`/api/tasks/${selectedTaskId}/cancel`, { method: 'POST' })
+    await Promise.all([loadDetail(selectedTaskId), load()])
+  }
+
+  let verification: Record<string, unknown> | null = null
+  if (detail?.task.verification_json && detail.task.verification_json !== '{}') {
+    try { verification = JSON.parse(detail.task.verification_json) } catch { verification = null }
+  }
+
+  return (
+    <div className="agents-layout">
+      <aside className="agents-roster">
+        <div className="section-heading"><div><h2>Agents</h2><p>Coordinator plans, Researcher retrieves, Worker drafts, Verifier checks — every handoff is a durable, replayable checkpoint.</p></div><Users size={22}/></div>
+        <div className="agent-card-list">
+          {agents.map((agent) => (
+            <article key={agent.id} className="agent-card">
+              <div><strong>{agent.name}</strong><span className={`status ${agent.status === 'working' ? 'pending' : 'applied'}`}>{agent.status}</span></div>
+              <p>{agent.role}</p>
+              <small>{agent.provider} · {agent.model}</small>
+            </article>
+          ))}
+          {!agents.length && <p className="muted">Agents are created automatically the first time this tab loads.</p>}
+        </div>
+      </aside>
+
+      <section className="agents-main">
+        <form className="inline-form task-form" onSubmit={createTask}>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Task title" required/>
+          <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Describe what the Worker Agent should do. It only uses retrieved project context, and never claims a tool ran unless the result is attached." required/>
+          <div className="task-form-row">
+            <select value={provider} onChange={(event) => setProvider(event.target.value as typeof provider)}>
+              <option value="auto">Automatic router</option>
+              <option value="mock">Safe mock</option>
+              <option value="ollama">Ollama local</option>
+            </select>
+            <button className="primary" disabled={creating}>{creating ? <Loader2 className="spin" size={15}/> : <Plus size={15}/>}Queue task</button>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+        </form>
+
+        <div className="task-columns">
+          <div className="task-list">
+            <h3>Tasks</h3>
+            {!tasks.length && <p className="muted">No tasks yet for this project.</p>}
+            {tasks.map((task) => (
+              <button key={task.id} className={selectedTaskId === task.id ? 'task-row selected' : 'task-row'} onClick={() => setSelectedTaskId(task.id)}>
+                <span className={`status ${taskStatusClass(task.status)}`}>{task.status}</span>
+                <strong>{task.title}</strong>
+                <small>{new Date(task.created_at).toLocaleString()}</small>
+              </button>
+            ))}
+          </div>
+
+          <div className="task-detail">
+            {!detail ? <p className="muted">Select a task to see its checkpoint timeline.</p> : <>
+              <div className="task-detail-header">
+                <div><strong>{detail.task.title}</strong><span className={`status ${taskStatusClass(detail.task.status)}`}>{detail.task.status}</span></div>
+                <div className="task-detail-actions">
+                  {(detail.task.status === 'queued' || detail.task.status === 'failed') && <button className="primary small" onClick={() => void runSelected()} disabled={running}>{running ? <Loader2 className="spin" size={13}/> : <PlayCircle size={13}/>}Run</button>}
+                  {!TERMINAL_TASK_STATES.has(detail.task.status) && <button onClick={() => void cancelSelected()}><StopCircle size={13}/>Cancel</button>}
+                </div>
+              </div>
+              <p className="task-instruction">{detail.task.instruction}</p>
+              <div className="event-timeline">
+                {detail.events.map((event) => (
+                  <div key={event.id} className={`event-row ${event.state}`}>
+                    <span className="event-dot"/>
+                    <div><strong>{event.state}</strong><p>{event.message}</p><small>{new Date(event.created_at).toLocaleString()}</small></div>
+                  </div>
+                ))}
+              </div>
+              {!!detail.task.result_text && <div className="task-result"><h4>Worker result</h4><pre>{detail.task.result_text}</pre></div>}
+              {verification && <div className="task-verification"><h4>Verifier checks</h4><pre>{JSON.stringify(verification, null, 2)}</pre></div>}
+            </>}
+          </div>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function ContextRail({ project, hardware, ollama, onOpenWizard }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onOpenWizard: () => void }) {

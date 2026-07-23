@@ -15,13 +15,14 @@ Core local workspace, project indexing, FTS5 retrieval, memory, decision ledger,
 - model load/unload lifecycle hooks
 - semantic embedding plugin
 - ~~DOCX/XLSX/PPTX parsers~~ ✓ implemented (`indexer.py`, ported from v2 during the v1/v2 merge)
-- ~~multi-agent task orchestration~~ ✓ implemented (`agent_runtime.py`: Coordinator/Researcher/Worker/Verifier, ported from v2 during the v1/v2 merge); not yet surfaced in the Workspace UI, see `docs/agent-runtime.md`
-- ~~dependency-free fallback UI~~ ✓ implemented (`apps/local-ui`, served at `/app/`, ported from v2)
+- ~~multi-agent task orchestration~~ ✓ implemented (`agent_runtime.py`: Coordinator/Researcher/Worker/Verifier, ported from v2 during the v1/v2 merge), see `docs/agent-runtime.md`
+- ~~dependency-free fallback UI~~ ✓ implemented (`apps/local-ui`, served at `/app/`, ported from v2); kept permanently as a lightweight fallback surface, see `docs/decisions/v1-v2-merge-and-agents-panel.md`
 - ~~stale-write detection on file proposals~~ ✓ implemented (`services.py`: sha256 check + atomic tempfile write, ported from v2)
 - Indonesian localization
 - ComfyUI executor
 - AST-based graph extraction (tree-sitter for Python/JS/TS, replacing regex) ✓ implemented (`ast_extractor.py`); expanded to Go/Rust/PHP/Java/C/C++
-- Agents tab in the Next.js Workspace UI (agent_runtime.py has no Workspace.tsx panel yet, only local-ui)
+- ~~Agents tab in the Next.js Workspace UI~~ ✓ implemented (`Workspace.tsx`: `AgentsView`, agent roster + task queue + live checkpoint timeline)
+- ~~INMYAI_* env-prefix binding bug~~ ✓ fixed (`config.py`: `env_prefix='INMYAI_'` + per-field `validation_alias` for the intentionally-unprefixed Ollama/ComfyUI vars); documented env vars now actually bind
 
 ## P2
 

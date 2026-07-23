@@ -1,7 +1,9 @@
 # Agent Runtime
 
-Ported from InMyAI v2 during the v1/v2 merge. Backend-complete and tested;
-not yet surfaced in the Next.js Workspace UI (see "Known gap" below).
+Ported from InMyAI v2 during the v1/v2 merge. Backend-complete and tested,
+and surfaced in both UIs: the Next.js Workspace's "Agents" tab
+(`Workspace.tsx` -> `AgentsView`) and the dependency-free `apps/local-ui`
+(served at `/app/`).
 
 ## Default agents
 
@@ -60,11 +62,14 @@ does not yet automatically delegate to arbitrary custom agents — the task
 pipeline is still the fixed four-step plan above. Documented P1 limitation,
 same status as in v2.
 
-## Known gap: no Workspace UI panel yet
+## Workspace UI panel
 
-The dependency-free `apps/local-ui` (served at `/app/`) has an Agents view
-that lists agents, runs tasks, and shows the event timeline. The richer
-Next.js Workspace (`apps/web`, the default UI) does not have an equivalent
-view yet — it only gained this backend during the merge. Adding an "Agents"
-tab to Workspace.tsx (mirroring the Chat/Files/Memory/Graph/Studio/Git
-pattern) is the natural next step; see the merge report for details.
+`Workspace.tsx` has an "Agents" tab (`AgentsView`) alongside
+Chat/Files/Memory/Graph/Studio/Git: an agent roster, a task queue with a
+create-task form (title, instruction, provider), and a task detail pane with
+Run/Cancel actions and a live checkpoint timeline (polls `GET
+/api/tasks/{id}` every 2s while the task is not in a terminal state). The
+dependency-free `apps/local-ui` (served at `/app/`) has an equivalent, simpler
+Agents view and is kept as a permanent lightweight fallback — see
+`docs/decisions/v1-v2-merge-and-agents-panel.md` for why both UIs are kept
+rather than deprecating one.

@@ -1,0 +1,151 @@
+# Decision record: Tauri desktop shell (first pass - dev mode + native folder picker)
+
+Date: 2026-07-24
+Status: scaffolded and verified as far as this sandbox allows; **first real
+run of `cargo tauri dev` still needs to happen on your Windows machine** -
+see section 5.
+
+## 1. The problem
+
+You asked, after hitting the browser's folder-typing friction twice: "kalau
+gini caranya lebih tepat gue bikin aplikasi local dong ya?" This was already
+a known gap - `docs/roadmap.md` has listed "Tauri desktop shell and native
+folder picker" as an unbuilt P1 item since early in this project, for
+exactly this reason. Today's Settings improvements (inline browser, allowed
+folders UI) reduce the friction; a real native folder picker removes the
+underlying cause instead of working around it.
+
+## 2. What "local" already meant, and what a desktop shell actually changes
+
+InMyAI's backend and data were already 100% local before this - nothing
+about this change makes it "more local" in a privacy or data-location
+sense. What changes is the *delivery mechanism*: today you run
+`npm run dev` in a terminal and open `localhost:3000` in a browser tab;
+after this, there's a real `InMyAI.exe` you can pin to the Start Menu, and
+its window's file dialogs are genuine OS dialogs instead of a web page's
+approximation of one.
+
+Tauri was chosen over Electron for the same reason the rest of this app
+favors small footprints: Tauri uses the OS's own web renderer (WebView2 on
+Windows, already built into Windows 10/11) instead of bundling an entire
+Chromium copy per app, so the resulting binary and memory footprint are a
+small fraction of an equivalent Electron app - consistent with this
+project's "everyday 8-16 GB laptop" design constraint.
+
+## 3. Scope of this pass: dev mode + folder picker only, not production packaging yet
+
+**What's included:**
+
+- `apps/web/src-tauri/` - a minimal Tauri v2 project (`Cargo.toml`,
+  `tauri.conf.json`, `main.rs`, `build.rs`, placeholder icons) configured so
+  `cargo tauri dev` runs the repo root's existing `npm run dev` (which
+  already starts both the FastAPI backend and the Next.js dev server -
+  `scripts/dev.mjs`, unchanged) and opens a native window pointing at
+  `http://127.0.0.1:3000` once it's reachable.
+- `tauri-plugin-dialog` (Rust) + `@tauri-apps/plugin-dialog` (JS): a real
+  native folder-picker dialog.
+- `apps/web/src/lib/tauri.ts`: `isTauri()` detects whether the page is
+  running inside this shell versus a plain browser tab;
+  `pickFolderNative()` opens the OS dialog and returns a real absolute
+  path, or `null` if not running inside Tauri (or if the user cancelled).
+- Wired into the two places path-typing friction showed up: the "Browse…"
+  button in Settings' "Add a local project" form, and a new "Browse…"
+  button in the Explorer toolbar (shown only when `isTauri()` is true,
+  since the plain-browser version already has its own path input and the
+  inline HTML folder browser - see `allowed-roots-ui.md`).
+
+**What's deliberately deferred to a follow-up pass**, because it's a
+meaningfully larger, separate body of work:
+
+- **Production bundling** (a real installer `.msi`/`.exe` someone else can
+  double-click to install): `tauri.conf.json`'s `frontendDist` points at
+  `apps/web/out`, which would need Next.js configured for static export
+  (`output: 'export'`) and a real `beforeBuildCommand` - not done yet.
+- **Bundling the Python backend** so an end user doesn't need Python/Node
+  installed at all (a Tauri "sidecar" binary, typically built with
+  PyInstaller). Right now `cargo tauri dev` still relies on your existing
+  `.venv` and Node install, exactly like `npm run dev` does today - this
+  pass only changes *how the window opens*, not what it depends on.
+- **Code signing / distribution** for handing a built app to someone else
+  without Windows SmartScreen warnings.
+
+Rationale for stopping here: the concrete pain point you raised was the
+folder picker specifically, and that's fully solved by this pass without
+first solving the much larger "ship a zero-dependency installer to a
+stranger" problem, which deserves its own dedicated pass (and its own
+decision about code signing, update mechanism, etc.) rather than being
+rushed alongside everything else already shipped today.
+
+## 4. What was actually verified, and what couldn't be
+
+This sandbox has no Rust/Cargo toolchain and no way to produce or run a
+Windows binary regardless (no WebView2, no Windows). What **was** verified
+here, since none of it depends on Rust:
+
+- `npm install` succeeds with the new `@tauri-apps/api`,
+  `@tauri-apps/plugin-dialog`, `@tauri-apps/cli` dependencies.
+- `tsc --noEmit` is clean with the new `lib/tauri.ts` and its two call
+  sites.
+- All 14 frontend tests still pass.
+- `next build` still succeeds (verified the same way as every other
+  frontend change this session - built from an `/tmp` copy, since building
+  directly on this sandbox's mounted folder hits an unrelated `Bus error`
+  mmap artifact, see `explorer-and-terminal.md` section 7).
+- `tauri.conf.json`, `package.json`, and `Cargo.toml` are all valid
+  JSON/TOML.
+- The generated icons (`apps/web/src-tauri/icons/`) are real, valid
+  multi-size PNG/ICO files (placeholder artwork - a simple rounded square
+  with a dot, loosely echoing the app's existing logo mark - swap for real
+  branding whenever you have it, via `npx tauri icon <path-to-a-1024px-png>`
+  from `apps/web`, which regenerates every required size automatically).
+
+What could **not** be verified here and needs your machine: whether
+`cargo tauri dev` actually compiles and opens a working native window at
+all. That's a real, non-trivial first-run step (installing Rust and the
+Windows C++ build tools if you don't have them already), not something to
+assume works from config review alone.
+
+## 5. Exact steps to try this on your machine
+
+```powershell
+cd "C:\Users\Amand\.gemini\antigravity\scratch\ideagentics\demo\InMyAI_FullStack"
+
+# 1. Rust toolchain (skip if `rustc --version` already works)
+winget install -e --id Rustlang.Rustup
+# then open a NEW PowerShell window so PATH picks up cargo/rustc
+
+# 2. Tauri's Windows build requirement: the C++ build tools (skip if you
+#    already have Visual Studio or "Build Tools for Visual Studio" with the
+#    "Desktop development with C++" workload installed)
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools;includeRecommended"
+
+# 3. Pull in the new JS dependencies (@tauri-apps/*) added this session
+npm install
+
+# 4. First run - this compiles the Rust side (slow the first time, a few
+#    minutes; fast on subsequent runs) and should open a native InMyAI
+#    window with your existing app inside it
+npm run desktop:dev
+```
+
+Once it opens: go to Settings -> "Add a local project" -> click
+**Browse…** - it should now pop a real Windows folder-picker dialog instead
+of the in-page browser, and picking a folder there hands back a real
+`C:\...` path directly, no typing at all. Same for the new **Browse…**
+button in the Explorer toolbar.
+
+If `cargo tauri dev` fails at this first attempt, paste the exact error and
+we'll debug it together - environment setup (missing build tools, PATH
+issues, etc.) is the most likely first-run snag, not the Tauri config
+itself.
+
+## 6. How to verify what doesn't need Rust
+
+```powershell
+npm run typecheck:web
+npm run test:web
+```
+
+Both should pass exactly as they did before this change - this pass adds a
+new, additive capability without touching any existing behavior in the
+plain-browser mode.

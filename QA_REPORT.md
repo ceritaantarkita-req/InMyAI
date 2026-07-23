@@ -13,6 +13,7 @@ Date: 2026-07-23 (updated after the Explorer + Terminal tabs; earlier updates fr
 | Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
 | Next.js production build (`next build`) | PASS — see note below |
 | Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal tabs |
+| Tauri desktop shell (`cargo tauri dev`) | NOT RUN — no Rust toolchain and no Windows/WebView2 in this sandbox; everything checkable without Rust (npm install, tsc, tests, next build) is clean, but the first real compile+run needs your machine, see `docs/decisions/tauri-desktop-shell.md` |
 
 `next build` was run against a copy of `apps/web` outside this sandbox's
 FUSE-mounted project folder (an `rsync` into `/tmp`, `node_modules` fetched
@@ -64,10 +65,15 @@ environment artifact, not a code defect.
 - Added a Settings UI (`GET/POST/DELETE /api/settings/allowed-roots`) to
   manage allowed project folders without editing `.env` or restarting -
   including a one-click "Allow this folder & retry" fix inline in the
-  registration error itself.
+  registration error itself, plus an inline in-browser folder picker.
+- Started a Tauri desktop shell (`apps/web/src-tauri`, `npm run
+  desktop:dev`): dev-mode native window + a real OS folder picker, wired
+  into Settings and Explorer. Production installer packaging is a
+  follow-up (see `docs/decisions/tauri-desktop-shell.md`).
 
 Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`,
-`docs/decisions/explorer-and-terminal.md`, and `docs/decisions/allowed-roots-ui.md`.
+`docs/decisions/explorer-and-terminal.md`, `docs/decisions/allowed-roots-ui.md`,
+and `docs/decisions/tauri-desktop-shell.md`.
 
 ## Smoke workflow
 

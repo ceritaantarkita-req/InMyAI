@@ -6,7 +6,11 @@ Core local workspace, project indexing, FTS5 retrieval, memory, decision ledger,
 
 ## P1
 
-- Tauri desktop shell and native folder picker
+- Tauri desktop shell and native folder picker - **in progress**: dev-mode
+  shell + native folder picker implemented (`apps/web/src-tauri`,
+  `npm run desktop:dev`), see `docs/decisions/tauri-desktop-shell.md`;
+  production installer packaging (static export, bundled Python sidecar,
+  code signing) is the remaining, larger piece
 - ~~Graphify importer~~ ✓ implemented (CLI: `scripts/import_graphify.py`)
 - ~~Git tools~~ ✓ implemented (`git_tools.py`: read-only status/log/diff/branch/blame)
 - language-server

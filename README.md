@@ -38,6 +38,29 @@ InMyAI is a lightweight, local-first AI workspace designed for everyday laptops 
 - One-heavy-engine-at-a-time architecture
 - English-first interface with straightforward i18n extension path
 
+## Desktop app (Tauri) — experimental, dev mode only for now
+
+A native desktop shell (`apps/web/src-tauri`) is in progress. What it adds
+over the browser version today: a real window (no `localhost:3000` tab to
+remember) and a genuine native OS folder picker wherever you'd otherwise
+type an absolute path. It still runs on your existing `.venv`/Node setup
+under the hood — production packaging (a real installer, no Python/Node
+required) is future work, tracked in `docs/roadmap.md`.
+
+Requirements beyond the regular Quick start below: [Rust via
+rustup](https://rustup.rs) and, on Windows, the "Desktop development with
+C++" workload (Visual Studio Build Tools or full Visual Studio).
+
+```powershell
+npm install
+npm run desktop:dev
+```
+
+First run compiles the Rust side and can take a few minutes; it's fast
+after that. See `docs/decisions/tauri-desktop-shell.md` for the exact
+winget commands for the prerequisites and what this pass does and
+deliberately doesn't cover yet.
+
 ## One-command install — Windows
 
 Once this repo is pushed to GitHub (replace `<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>` in the command below with the real path), anyone with Git, Node.js, and Python already on their machine can set up and launch InMyAI with a single PowerShell command:

@@ -14,7 +14,9 @@
     "test:api": "python -m pytest services/api/tests -q",
     "setup": "node scripts/setup.mjs",
     "dev": "node scripts/dev.mjs",
-    "qa": "node scripts/qa.mjs"
+    "qa": "node scripts/qa.mjs",
+    "desktop:dev": "npm run tauri --workspace apps/web -- dev",
+    "desktop:build": "npm run tauri --workspace apps/web -- build"
   },
   "overrides": {
     "next": {

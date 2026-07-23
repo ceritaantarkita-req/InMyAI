@@ -188,3 +188,33 @@ application, not a library - a locked dependency tree is wanted, matching
 Tauri's own project template convention). `apps/web/src-tauri/gen/schemas/`
 (auto-regenerated capability/ACL JSON on every build) and `target/` (Rust
 build output) are gitignored, also matching Tauri's own template.
+
+## 8. Second bug found immediately after: "dialog.open not allowed"
+
+**Symptom:** with section 7's fix in place, the UI became fully clickable
+(confirmed: Settings modal, Allowed folders section, etc. all worked) - but
+clicking "Browse…" threw `dialog.open not allowed. Permissions associated
+with this command: dialog:allow-open, dialog:default`.
+
+**Root cause:** Tauri v2 gates every plugin command behind an explicit,
+per-window capability/permission grant (its ACL system) - and the initial
+hand-written scaffold in this session (Cargo.toml/tauri.conf.json/main.rs)
+never created a `capabilities/` file at all, so the main window had no
+permissions granted beyond whatever Tauri's absolute baseline default is -
+not enough to call `dialog.open`. This is the one piece the normal
+`npm create tauri-app` scaffolding tool would have generated automatically
+that hand-writing the config from scratch skipped.
+
+**Fix:** added `apps/web/src-tauri/capabilities/default.json`, granting the
+`main` window `core:default` (baseline app capabilities) and
+`dialog:default` (everything the dialog plugin exposes, including `open`) -
+exactly the two permission identifiers the error message itself named as
+acceptable. Tauri auto-loads every JSON file under `capabilities/`, no
+change to `tauri.conf.json` needed.
+
+**Needs a restart, not just a page reload:** capabilities are compiled into
+the binary by `tauri-build` at build time, not read live from disk - after
+pulling this fix, stop `npm run desktop:dev` (Ctrl+C) and start it again.
+It should be much faster than the very first run (only the capability
+manifest changed, not the Rust dependency tree), and "Browse…" should then
+open a real Windows folder dialog.

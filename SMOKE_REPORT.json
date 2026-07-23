@@ -12,6 +12,11 @@
       "status": 200
     },
     {
+      "method": "POST",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
       "method": "GET",
       "path": "/api/projects",
       "status": 200
@@ -35,18 +40,42 @@
       "method": "GET",
       "path": "/api/models/status",
       "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/1/agents",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/1/run",
+      "status": 200
     }
   ],
   "project": "Synthetic demo",
   "index": {
-    "indexed": 0,
-    "unchanged": 4,
+    "indexed": 4,
+    "unchanged": 0,
     "removed": 0,
     "errors": []
   },
-  "search_hits": 1,
+  "search_hits": 2,
   "chat_provider": "mock",
   "chat_citations": 2,
   "hardware_profile": "lite",
-  "ollama_available": false
+  "ollama_available": false,
+  "agent_task_status": "completed",
+  "agent_task_events": [
+    "queued",
+    "planning",
+    "retrieving",
+    "running_tool",
+    "verifying",
+    "completed"
+  ]
 }

@@ -17,11 +17,18 @@ client = TestClient(app)
 
 
 def create_demo_project() -> dict:
-    projects = client.get('/api/projects').json()
-    if projects:
-        return projects[0]
+    # Select the shared seeded demo project by name+path, NOT by list
+    # position. Other test files (e.g. test_index_status.py) register their
+    # own throwaway projects which become projects[0] under the default
+    # created_at DESC ordering — grabbing positionally would then point this
+    # helper at the wrong (possibly deleted) directory. Matching by identity
+    # keeps the shared state stable across the whole session.
+    demo_path = str(settings.workspace_root / 'demo')
+    for project in client.get('/api/projects').json():
+        if project['name'] == 'Demo' and project['path'] == demo_path:
+            return project
     response = client.post('/api/projects', json={
-        'name': 'Demo', 'path': str(settings.workspace_root / 'demo')
+        'name': 'Demo', 'path': demo_path
     })
     assert response.status_code == 200, response.text
     return response.json()
@@ -38,7 +45,7 @@ def test_project_index_search_and_graph() -> None:
     project = create_demo_project()
     result = client.post(f"/api/projects/{project['id']}/index")
     assert result.status_code == 200, result.text
-    assert result.json()['indexed'] >= 3
+    assert (result.json()['indexed'] + result.json()['unchanged']) >= 3
     search = client.post('/api/search', json={'project_id': project['id'], 'query': 'SQLite'}).json()
     assert search['results'][0]['relative_path'] == 'README.md'
     graph = client.get(f"/api/projects/{project['id']}/graph", params={'node': 'main.ts'}).json()

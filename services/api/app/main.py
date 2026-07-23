@@ -4,7 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +33,7 @@ async def lifespan(_app: FastAPI):
     # in-memory `settings.allowed_roots` needs to be rebuilt from the DB on
     # every process start.
     services.sync_allowed_roots()
+    services.reset_interrupted_indexing()
     yield
 
 
@@ -213,22 +214,37 @@ def delete_allowed_root(root_id: int) -> dict:
 
 
 @app.post('/api/projects')
-def create_project(payload: ProjectCreate) -> dict:
+def create_project(payload: ProjectCreate, background_tasks: BackgroundTasks) -> dict:
     try:
-        return services.create_project(payload.name, payload.path)
+        project = services.create_project(payload.name, payload.path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(index_project, project['id'], Path(project['path']))
+    return project
 
 
 @app.post('/api/projects/{project_id}/index')
 def index(project_id: int) -> dict:
     try:
         project = services.get_project(project_id)
+        status = services.get_index_status(project_id)
+        if status['status'] == 'indexing':
+            raise HTTPException(status_code=409, detail='Indexing is already in progress.')
         return index_project(project_id, Path(project['path']))
+    except HTTPException:
+        raise
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/index-status')
+def index_status(project_id: int) -> dict:
+    try:
+        return services.get_index_status(project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get('/api/projects/{project_id}/files')

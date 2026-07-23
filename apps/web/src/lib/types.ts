@@ -1,4 +1,12 @@
 export type Project = { id: number; name: string; path: string; status: string; indexed_at?: string }
+export type IndexStatus = {
+  status: string
+  phase: 'scanning' | 'indexing' | 'done' | 'failed' | 'idle'
+  total_files: number
+  processed_files: number
+  error: string | null
+  indexed_at: string | null
+}
 export type IndexedFile = { id: number; relative_path: string; extension: string; size_bytes: number; indexed_at: string }
 export type Memory = { id: number; kind: string; title: string; content: string; source: string; confidence: number; updated_at: string }
 export type Decision = { id: number; statement: string; rationale: string; status: string; supersedes_id?: number; created_at: string }

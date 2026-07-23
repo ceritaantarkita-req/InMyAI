@@ -14,7 +14,7 @@ import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
 import { isTauri, pickFolderNative } from '@/lib/tauri'
-import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
+import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
 // load time, which crashes Next.js's server-side render pass if bundled
@@ -54,6 +54,8 @@ export function Workspace() {
 
   const project = projects.find((item) => item.id === projectId) || null
 
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null)
+
   const loadSystem = useCallback(async () => {
     try {
       const [projectData, hardwareData, modelData] = await Promise.all([
@@ -71,6 +73,30 @@ export function Workspace() {
   }, [])
 
   useEffect(() => { void loadSystem() }, [loadSystem])
+
+  useEffect(() => {
+    if (!project) { setIndexStatus(null); return }
+    const activeProjectId = project.id
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    async function poll() {
+      try {
+        const status = await api<IndexStatus>(`/api/projects/${activeProjectId}/index-status`)
+        if (cancelled) return
+        setIndexStatus(status)
+        if (status.status === 'pending' || status.status === 'indexing') {
+          timer = setTimeout(poll, 1500)
+        } else if (status.status === 'ready') {
+          void loadSystem()
+        }
+      } catch { /* transient; keep last known status */ }
+    }
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [project?.id, project?.status, loadSystem])
 
   // Auto-open the onboarding wizard the first time we learn Ollama is not
   // usable (unavailable, or running with zero models). shouldShowWizard also
@@ -92,6 +118,17 @@ export function Workspace() {
     try {
       const result = await api<{ indexed: number; unchanged: number; errors: string[] }>(`/api/projects/${projectId}/index`, { method: 'POST' })
       setNotice(`Index complete: ${result.indexed} updated, ${result.unchanged} unchanged${result.errors.length ? `, ${result.errors.length} skipped` : ''}.`)
+      await loadSystem()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Index failed.')
+    } finally { setBusy(false) }
+  }
+
+  async function retryIndex() {
+    if (!projectId) return
+    setBusy(true); setNotice('')
+    try {
+      await api(`/api/projects/${projectId}/index`, { method: 'POST' })
       await loadSystem()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Index failed.')
@@ -136,6 +173,21 @@ export function Workspace() {
             <button className="icon-button" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
           </div>
         </header>
+          {project && indexStatus && (indexStatus.status === 'pending' || indexStatus.status === 'indexing') && (
+            <div className="index-progress-banner">
+              <Loader2 className="spin" size={16}/>
+              <span>Indexing project… {indexStatus.processed_files}/{indexStatus.total_files || '?'} files</span>
+              <div className="progress-track">
+                <i style={{ width: `${indexStatus.total_files ? Math.round((indexStatus.processed_files / indexStatus.total_files) * 100) : 0}%` }}/>
+              </div>
+            </div>
+          )}
+          {project && indexStatus && indexStatus.status === 'failed' && (
+            <div className="index-progress-banner failed">
+              <span>Indexing failed{indexStatus.error ? `: ${indexStatus.error}` : ''}.</span>
+              <button className="primary small" onClick={() => void retryIndex()} disabled={busy}>{busy ? <Loader2 className="spin" size={14}/> : <RefreshCw size={14}/>}Retry</button>
+            </div>
+          )}
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Close notice"><X size={15}/></button></div>}
         <div className="content-area">
           {view === 'explorer' ? (
@@ -722,7 +774,7 @@ function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: s
 }
 
 function ContextRail({ project, hardware, ollama, onOpenWizard }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onOpenWizard: () => void }) {
-  return <aside className="context-rail"><h3>Context</h3><div className="context-block"><span>Active project</span><strong>{project?.name || 'None selected'}</strong><small>{project?.indexed_at ? `Indexed ${new Date(project.indexed_at).toLocaleString()}` : 'Not indexed yet'}</small></div><div className="context-block"><span>Resource profile</span><strong>{hardware?.profile || 'Checking'} mode</strong><div className="meter"><i style={{ width: `${hardware?.ram.percent || 0}%` }}/></div><small>{hardware ? `${hardware.ram.available_gb} GB RAM available` : 'Reading local hardware'}</small></div><div className="context-block"><span>Model runtime</span>{ollama?.available ? <strong>Ollama connected</strong> : <button className="link-button rail-action" onClick={onOpenWizard}>Safe Mock — click to set up Ollama</button>}<small>{ollama?.available ? `${ollama.models.length} model(s) installed` : 'Core remains testable without weights'}</small></div><div className="context-block"><span>Safety policy</span><ul><li>One heavy engine at a time</li><li>Write through approval only</li><li>Automatic file backup</li><li>1.5 GB RAM guard</li></ul></div></aside>
+  return <aside className="context-rail"><h3>Context</h3><div className="context-block"><span>Active project</span><strong>{project?.name || 'None selected'}</strong><small>{project?.status === 'failed' ? 'Indexing failed — retry from the toolbar' : project?.status === 'indexing' ? 'Indexing…' : project?.status === 'pending' ? 'Queued for indexing…' : project?.indexed_at ? `Indexed ${new Date(project.indexed_at).toLocaleString()}` : 'Not indexed yet'}</small></div><div className="context-block"><span>Resource profile</span><strong>{hardware?.profile || 'Checking'} mode</strong><div className="meter"><i style={{ width: `${hardware?.ram.percent || 0}%` }}/></div><small>{hardware ? `${hardware.ram.available_gb} GB RAM available` : 'Reading local hardware'}</small></div><div className="context-block"><span>Model runtime</span>{ollama?.available ? <strong>Ollama connected</strong> : <button className="link-button rail-action" onClick={onOpenWizard}>Safe Mock — click to set up Ollama</button>}<small>{ollama?.available ? `${ollama.models.length} model(s) installed` : 'Core remains testable without weights'}</small></div><div className="context-block"><span>Safety policy</span><ul><li>One heavy engine at a time</li><li>Write through approval only</li><li>Automatic file backup</li><li>1.5 GB RAM guard</li></ul></div></aside>
 }
 
 function SettingsModal({ projects, hardware, ollama, onClose, onChanged, onOpenWizard }: { projects: Project[]; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onClose: () => void; onChanged: () => Promise<void>; onOpenWizard: () => void }) {

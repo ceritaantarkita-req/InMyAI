@@ -133,7 +133,7 @@ def create_project(name: str, raw_path: str) -> dict:
     with transaction() as conn:
         cur = conn.execute(
             'INSERT INTO projects(name,path,created_at,status) VALUES(?,?,?,?)',
-            (name.strip(), str(path), now, 'ready')
+            (name.strip(), str(path), now, 'pending')
         )
         project_id = cur.lastrowid
         conn.execute(
@@ -543,3 +543,44 @@ def hardware_snapshot() -> dict:
         'profile': 'lite' if vm.total < 12 * 1024**3 else 'standard',
         'guard': {'allow_new_engine': vm.available > 1.5 * 1024**3, 'max_active_models': 1}
     }
+
+
+def get_index_status(project_id: int) -> dict:
+    """Combined view of a project's indexing status for UI polling.
+
+    Joins projects.status with the index_progress row so the frontend can
+    drive a progress bar from one cheap read.
+    """
+    with connect() as conn:
+        project = conn.execute('SELECT status, indexed_at FROM projects WHERE id=?', (project_id,)).fetchone()
+        if not project:
+            raise KeyError('Project not found')
+        prog = conn.execute(
+            'SELECT phase,total_files,processed_files,error FROM index_progress WHERE project_id=?',
+            (project_id,)
+        ).fetchone()
+    return {
+        'status': project['status'],
+        'phase': prog['phase'] if prog else ('done' if project['indexed_at'] else 'idle'),
+        'total_files': prog['total_files'] if prog else 0,
+        'processed_files': prog['processed_files'] if prog else 0,
+        'error': prog['error'] if prog else None,
+        'indexed_at': project['indexed_at'],
+    }
+
+
+def reset_interrupted_indexing() -> None:
+    """Startup recovery: any project left in 'indexing' from a crashed run is
+    moved back to 'pending' with a recorded 'interrupted' failure, so the UI
+    offers a Retry instead of looking permanently stuck."""
+    now = utc_now()
+    with transaction() as conn:
+        stuck = conn.execute("SELECT id FROM projects WHERE status='indexing'").fetchall()
+        for row in stuck:
+            conn.execute("UPDATE projects SET status='pending' WHERE id=?", (row['id'],))
+            conn.execute(
+                "INSERT INTO index_progress(project_id,phase,total_files,processed_files,started_at,updated_at,error) "
+                "VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(project_id) DO UPDATE SET phase='failed',error=excluded.error,updated_at=excluded.updated_at",
+                (row['id'], 'failed', 0, 0, now, now, 'interrupted: indexing did not complete'),
+            )

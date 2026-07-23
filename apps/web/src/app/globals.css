@@ -55,6 +55,10 @@ pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; whi
 .icon-button:hover { border-color: var(--line-strong); color: var(--text); background: var(--surface-2); }
 .notice { display: flex; align-items: center; justify-content: space-between; padding: 9px 16px; background: #fff9e9; border-bottom: 1px solid #f0dfac; color: #785516; font-size: 11px; }
 .notice button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; }
+.index-progress-banner { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #eef4ff; border-bottom: 1px solid #d6e0ff; font-size: 13px; }
+.index-progress-banner.failed { background: #fff0f0; border-color: #ffd6d6; }
+.index-progress-banner .progress-track { flex: 1; max-width: 220px; height: 6px; background: rgba(0,0,0,0.08); border-radius: 999px; overflow: hidden; margin-left: auto; }
+.index-progress-banner .progress-track i { display: block; height: 100%; background: #4a6cf7; transition: width 0.3s ease; }
 .content-area { min-height: 0; flex: 1; padding: 16px; overflow: hidden; }
 .context-rail { position: sticky; top: 0; height: 100vh; padding: 22px 17px; background: #fbfbfc; border-left: 1px solid var(--line); overflow: auto; }
 .context-rail h3 { margin: 0 0 18px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--soft); }

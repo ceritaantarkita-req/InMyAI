@@ -171,6 +171,15 @@ def migrate() -> None:
                 path TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS index_progress (
+                project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                phase TEXT NOT NULL DEFAULT 'scanning',
+                total_files INTEGER NOT NULL DEFAULT 0,
+                processed_files INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT
+            );
             '''
         )
         # Additive, idempotent column migrations for databases created before

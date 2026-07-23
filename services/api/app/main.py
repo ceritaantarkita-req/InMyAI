@@ -10,10 +10,12 @@ from fastapi.responses import FileResponse
 
 from .config import settings
 from .database import connect, migrate, transaction, utc_now
+from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
 from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_status
 from .image_provider import generate_with_comfyui
 from .router_engine import route, to_dict
+from .security import safe_join
 from .schemas import (
     ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
     ProjectCreate, SearchRequest, WriteProposalCreate
@@ -122,6 +124,67 @@ def graph(project_id: int, node: str = '') -> dict:
     if node:
         return services.graph_query(project_id, node)
     return {'relations': services.list_relations(project_id)}
+
+
+def _git_project_path(project_id: int) -> Path:
+    """Resolve a registered project's path for git operations. Raises KeyError/HTTPException."""
+    project = services.get_project(project_id)
+    return Path(project['path']).resolve()
+
+
+@app.get('/api/projects/{project_id}/git/status')
+def git_status_endpoint(project_id: int) -> dict:
+    try:
+        return git_status(_git_project_path(project_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/git/log')
+def git_log_endpoint(project_id: int, limit: int = Query(50, ge=1, le=500)) -> dict:
+    try:
+        return {'entries': git_log(_git_project_path(project_id), limit=limit)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/git/branches')
+def git_branches_endpoint(project_id: int) -> dict:
+    try:
+        return git_branches(_git_project_path(project_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/git/diff')
+def git_diff_endpoint(project_id: int, path: str = Query('')) -> dict:
+    try:
+        project_path = _git_project_path(project_id)
+        # Validate an optional path against the project root before handing to git.
+        relative = safe_join(project_path, path, must_exist=False).relative_to(project_path).as_posix() if path else None
+        return {'diff': git_diff(project_path, relative)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/git/blame')
+def git_blame_endpoint(project_id: int, path: str = Query(...)) -> dict:
+    try:
+        project_path = _git_project_path(project_id)
+        relative = safe_join(project_path, path, must_exist=False).relative_to(project_path).as_posix()
+        return {'lines': git_blame(project_path, relative)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get('/api/projects/{project_id}/proposals')

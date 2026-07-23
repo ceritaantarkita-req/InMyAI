@@ -1,9 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-test('core navigation remains limited to five primary work surfaces', () => {
-  const views = ['chat', 'files', 'memory', 'graph', 'studio']
-  assert.equal(views.length, 5)
+test('core navigation lists the primary work surfaces without duplicates', () => {
+  const views = ['chat', 'files', 'memory', 'graph', 'studio', 'git']
   assert.equal(new Set(views).size, views.length)
 })
 

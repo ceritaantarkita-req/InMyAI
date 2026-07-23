@@ -11,7 +11,7 @@ import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, Project, Proposal, Relation } from '@/lib/types'
 
-type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio'
+type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
 
 const nav: { id: View; label: string; icon: typeof Bot }[] = [
@@ -19,7 +19,8 @@ const nav: { id: View; label: string; icon: typeof Bot }[] = [
   { id: 'files', label: 'Files', icon: FileCode2 },
   { id: 'memory', label: 'Memory', icon: BrainCircuit },
   { id: 'graph', label: 'Graph', icon: Network },
-  { id: 'studio', label: 'Studio', icon: Sparkles }
+  { id: 'studio', label: 'Studio', icon: Sparkles },
+  { id: 'git', label: 'Git', icon: GitBranch }
 ]
 
 export function Workspace() {
@@ -96,8 +97,9 @@ export function Workspace() {
             {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available}/>} 
             {view === 'files' && <FilesView project={project}/>} 
             {view === 'memory' && <MemoryView project={project}/>} 
-            {view === 'graph' && <GraphView project={project}/>} 
-            {view === 'studio' && <StudioView project={project}/>} 
+            {view === 'graph' && <GraphView project={project}/>}
+            {view === 'studio' && <StudioView project={project}/>}
+            {view === 'git' && <GitView project={project}/>}
           </div>
         )}
       </section>
@@ -250,6 +252,90 @@ function StudioView({ project }: { project: Project }) {
   async function ocr() { setBusy(true); try { const result = await api<{ text: string }>('/api/ocr', { method: 'POST', body: JSON.stringify({ project_id: project.id, relative_path: ocrFile, language: 'eng' }) }); setOcrText(result.text) } finally { setBusy(false) } }
   async function generate() { setBusy(true); try { const result = await api<{ relative_path: string; notice: string; seed: number }>('/api/images/generate', { method: 'POST', body: JSON.stringify({ project_id: project.id, prompt, width: 512, height: 512, steps: 4, seed: -1, provider: imageProvider }) }); setImageResult(result) } finally { setBusy(false) } }
   return <div className="studio-grid"><section><div className="section-heading"><div><h2>OCR & extract</h2><p>PDF text extraction and local Tesseract OCR.</p></div><FileText size={22}/></div><select value={ocrFile} onChange={(e) => setOcrFile(e.target.value)}><option value="">Choose an indexed PDF or image path</option>{files.filter((file) => ['.pdf','.png','.jpg','.jpeg','.webp'].includes(file.extension)).map((file) => <option key={file.id}>{file.relative_path}</option>)}</select><button className="primary" onClick={() => void ocr()} disabled={!ocrFile || busy}>{busy ? <Loader2 className="spin" size={16}/> : <Search size={16}/>}Extract text</button><textarea className="output-area" value={ocrText} readOnly placeholder="Extracted text appears here…"/></section><section><div className="section-heading"><div><h2>Local image router</h2><p>Workflow simulator in core; real generation uses the optional local Diffusers or ComfyUI plugin.</p></div><ImageIcon size={22}/></div><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe the image…"/><div className="image-controls"><label>512 × 512</label><label>4 low-memory steps</label><label>Batch 1</label></div><select value={imageProvider} onChange={(e) => setImageProvider(e.target.value as 'simulator' | 'comfyui')}><option value="simulator">Workflow simulator</option><option value="comfyui">Local ComfyUI</option></select><button className="primary" onClick={() => void generate()} disabled={busy}>{busy ? <Loader2 className="spin" size={16}/> : <Sparkles size={16}/>}Run {imageProvider === 'comfyui' ? 'local generation' : 'workflow simulator'}</button>{imageResult && <div className="image-result"><img src={`${API_URL}/api/generated-file?project_id=${project.id}&path=${encodeURIComponent(imageResult.relative_path)}`} alt="Generated workflow simulation"/><p>{imageResult.notice}</p><small>Seed {imageResult.seed}</small></div>}</section></div>
+}
+
+function GitView({ project }: { project: Project }) {
+  type Tab = 'status' | 'log' | 'diff' | 'blame'
+  const [tab, setTab] = useState<Tab>('status')
+  const [status, setStatus] = useState<{ branch: string; staged: string[]; unstaged: string[]; untracked: string[] } | null>(null)
+  const [log, setLog] = useState<{ entries: { hash: string; author: string; date: string; message: string }[] } | null>(null)
+  const [branches, setBranches] = useState<{ current: string; local: string[]; remote: string[] } | null>(null)
+  const [diffPath, setDiffPath] = useState('')
+  const [diff, setDiff] = useState<string>('')
+  const [blamePath, setBlamePath] = useState('')
+  const [blame, setBlame] = useState<{ lines: { commit: string; author: string; content: string }[] } | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const run = useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true); setError('')
+    try { await fn() } catch (e) { setError(e instanceof Error ? e.message : 'Git operation failed') } finally { setBusy(false) }
+  }, [])
+
+  const loadStatus = useCallback(() => run(async () => {
+    const s = await api<{ branch: string; staged: string[]; unstaged: string[]; untracked: string[] }>(`/api/projects/${project.id}/git/status`)
+    setStatus(s)
+    const b = await api<{ current: string; local: string[]; remote: string[] }>(`/api/projects/${project.id}/git/branches`)
+    setBranches(b)
+  }), [project.id, run])
+
+  const loadLog = useCallback(() => run(async () => {
+    const l = await api<{ entries: { hash: string; author: string; date: string; message: string }[] }>(`/api/projects/${project.id}/git/log?limit=50`)
+    setLog(l)
+  }), [project.id, run])
+
+  const loadDiff = useCallback(() => run(async () => {
+    const qs = diffPath ? `?path=${encodeURIComponent(diffPath)}` : ''
+    const d = await api<{ diff: string }>(`/api/projects/${project.id}/git/diff${qs}`)
+    setDiff(d.diff)
+  }), [project.id, diffPath, run])
+
+  const loadBlame = useCallback(() => run(async () => {
+    if (!blamePath) return
+    const b = await api<{ lines: { commit: string; author: string; content: string }[] }>(`/api/projects/${project.id}/git/blame?path=${encodeURIComponent(blamePath)}`)
+    setBlame(b)
+  }), [project.id, blamePath, run])
+
+  useEffect(() => {
+    if (tab === 'status' && !status) void loadStatus()
+    if (tab === 'log' && !log) void loadLog()
+  }, [tab, status, log, loadStatus, loadLog])
+
+  return <div className="git-layout">
+    <section className="git-main">
+      <div className="git-tabs">{(['status', 'log', 'diff', 'blame'] as Tab[]).map((t) => (
+        <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
+      ))}</div>
+      {error && <div className="notice"><span>{error}</span><button onClick={() => setError('')} aria-label="Close"><X size={15}/></button></div>}
+      {busy && <div className="git-loading"><Loader2 className="spin" size={18}/> <span>Reading repository…</span></div>}
+      {tab === 'status' && status && <div className="git-status">
+        <div className="git-branch-row"><GitBranch size={16}/> <strong>{branches?.current || status.branch || '—'}</strong></div>
+        <div className="git-status-grid">
+          <div><h4>Staged ({status.staged.length})</h4>{status.staged.length ? status.staged.map((p) => <span key={p} className="git-entry staged">{p}</span>) : <span className="muted">clean</span>}</div>
+          <div><h4>Unstaged ({status.unstaged.length})</h4>{status.unstaged.length ? status.unstaged.map((p) => <span key={p} className="git-entry unstaged">{p}</span>) : <span className="muted">clean</span>}</div>
+          <div><h4>Untracked ({status.untracked.length})</h4>{status.untracked.length ? status.untracked.map((p) => <span key={p} className="git-entry untracked">{p}</span>) : <span className="muted">clean</span>}</div>
+        </div>
+      </div>}
+      {tab === 'log' && log && <div className="git-log">{log.entries.length ? log.entries.map((e) => (
+        <article key={e.hash} className="git-commit"><code>{e.hash.slice(0, 8)}</code><div><strong>{e.message}</strong><small>{e.author} · {e.date}</small></div></article>
+      )) : <p className="muted">No commits yet.</p>}</div>}
+      {tab === 'diff' && <div className="git-diff">
+        <div className="git-input-row"><input value={diffPath} onChange={(e) => setDiffPath(e.target.value)} placeholder="Optional path (leave empty for full diff)"/><button className="primary small" onClick={() => void loadDiff()} disabled={busy}>Show diff</button></div>
+        <pre className="code-editor">{diff || 'No diff loaded yet.'}</pre>
+      </div>}
+      {tab === 'blame' && <div className="git-blame">
+        <div className="git-input-row"><input value={blamePath} onChange={(e) => setBlamePath(e.target.value)} placeholder="Relative file path"/><button className="primary small" onClick={() => void loadBlame()} disabled={busy || !blamePath}>Blame</button></div>
+        {blame && <div className="git-blame-list">{blame.lines.map((line, i) => (
+          <div key={i} className="git-blame-line"><code>{line.commit.slice(0, 8)}</code><small>{line.author}</small><span>{line.content}</span></div>
+        ))}</div>}
+      </div>}
+    </section>
+    <aside className="git-side">
+      <div className="section-heading"><div><h3>Branches</h3><p>Current: {branches?.current || '—'}</p></div><GitBranch size={20}/></div>
+      {branches ? <div className="git-branch-list">{branches.local.map((b) => <span key={b} className={b === branches.current ? 'git-entry current' : 'git-entry'}>{b}</span>)}</div> : <p className="muted">Load status to see branches.</p>}
+      <div className="safety-box"><ShieldCheck size={18}/><div><strong>Read-only</strong><p>Git tools inspect the repository only. No commits, pushes, or branch changes are made through InMyAI.</p></div></div>
+    </aside>
+  </div>
 }
 
 function ContextRail({ project, hardware, ollama }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null }) {

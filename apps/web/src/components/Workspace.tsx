@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
-  Bot, BrainCircuit, Check, Code2, FileCode2, FileText, FolderOpen, GitBranch,
-  HardDrive, ImageIcon, Laptop, Loader2, MemoryStick, MessageSquareText, Network,
-  Plus, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, X
+  Bot, BrainCircuit, Check, Code2, Copy, Download, ExternalLink, FileCode2,
+  FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop, Loader2,
+  MemoryStick, MessageSquareText, Network, Plus, RefreshCw, Save, Search,
+  Send, Settings, ShieldCheck, Sparkles, TerminalSquare, X
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
-import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, Project, Proposal, Relation } from '@/lib/types'
+import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
+import type { ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation } from '@/lib/types'
 
 type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
@@ -30,6 +32,7 @@ export function Workspace() {
   const [hardware, setHardware] = useState<Hardware | null>(null)
   const [ollama, setOllama] = useState<{ available: boolean; models: { name: string }[]; error?: string } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
@@ -52,6 +55,20 @@ export function Workspace() {
   }, [])
 
   useEffect(() => { void loadSystem() }, [loadSystem])
+
+  // Auto-open the onboarding wizard the first time we learn Ollama is not
+  // usable (unavailable, or running with zero models). shouldShowWizard also
+  // checks the dismissed flag, so a user who already dismissed it once this
+  // session/device is not interrupted again.
+  useEffect(() => {
+    if (!ollama) return
+    if (shouldShowWizard(ollama.available, ollama.models.length)) setWizardOpen(true)
+  }, [ollama])
+
+  function closeWizard() {
+    dismissOnboarding()
+    setWizardOpen(false)
+  }
 
   async function indexActiveProject() {
     if (!projectId) return
@@ -104,9 +121,19 @@ export function Workspace() {
         )}
       </section>
 
-      <ContextRail project={project} hardware={hardware} ollama={ollama}/>
+      <ContextRail project={project} hardware={hardware} ollama={ollama} onOpenWizard={() => setWizardOpen(true)}/>
       <MobileNav view={view} setView={setView}/>
-      {settingsOpen && <SettingsModal projects={projects} hardware={hardware} ollama={ollama} onClose={() => setSettingsOpen(false)} onChanged={loadSystem}/>} 
+      {settingsOpen && (
+        <SettingsModal
+          projects={projects}
+          hardware={hardware}
+          ollama={ollama}
+          onClose={() => setSettingsOpen(false)}
+          onChanged={loadSystem}
+          onOpenWizard={() => { setSettingsOpen(false); setWizardOpen(true) }}
+        />
+      )}
+      {wizardOpen && <OnboardingWizard onClose={closeWizard} onReady={loadSystem}/>}
     </main>
   )
 }
@@ -338,14 +365,109 @@ function GitView({ project }: { project: Project }) {
   </div>
 }
 
-function ContextRail({ project, hardware, ollama }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null }) {
-  return <aside className="context-rail"><h3>Context</h3><div className="context-block"><span>Active project</span><strong>{project?.name || 'None selected'}</strong><small>{project?.indexed_at ? `Indexed ${new Date(project.indexed_at).toLocaleString()}` : 'Not indexed yet'}</small></div><div className="context-block"><span>Resource profile</span><strong>{hardware?.profile || 'Checking'} mode</strong><div className="meter"><i style={{ width: `${hardware?.ram.percent || 0}%` }}/></div><small>{hardware ? `${hardware.ram.available_gb} GB RAM available` : 'Reading local hardware'}</small></div><div className="context-block"><span>Model runtime</span><strong>{ollama?.available ? 'Ollama connected' : 'Mock fallback'}</strong><small>{ollama?.available ? `${ollama.models.length} model(s) installed` : 'Core remains testable without weights'}</small></div><div className="context-block"><span>Safety policy</span><ul><li>One heavy engine at a time</li><li>Write through approval only</li><li>Automatic file backup</li><li>1.5 GB RAM guard</li></ul></div></aside>
+function ContextRail({ project, hardware, ollama, onOpenWizard }: { project: Project | null; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onOpenWizard: () => void }) {
+  return <aside className="context-rail"><h3>Context</h3><div className="context-block"><span>Active project</span><strong>{project?.name || 'None selected'}</strong><small>{project?.indexed_at ? `Indexed ${new Date(project.indexed_at).toLocaleString()}` : 'Not indexed yet'}</small></div><div className="context-block"><span>Resource profile</span><strong>{hardware?.profile || 'Checking'} mode</strong><div className="meter"><i style={{ width: `${hardware?.ram.percent || 0}%` }}/></div><small>{hardware ? `${hardware.ram.available_gb} GB RAM available` : 'Reading local hardware'}</small></div><div className="context-block"><span>Model runtime</span>{ollama?.available ? <strong>Ollama connected</strong> : <button className="link-button rail-action" onClick={onOpenWizard}>Safe Mock — click to set up Ollama</button>}<small>{ollama?.available ? `${ollama.models.length} model(s) installed` : 'Core remains testable without weights'}</small></div><div className="context-block"><span>Safety policy</span><ul><li>One heavy engine at a time</li><li>Write through approval only</li><li>Automatic file backup</li><li>1.5 GB RAM guard</li></ul></div></aside>
 }
 
-function SettingsModal({ projects, hardware, ollama, onClose, onChanged }: { projects: Project[]; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onClose: () => void; onChanged: () => Promise<void> }) {
+function SettingsModal({ projects, hardware, ollama, onClose, onChanged, onOpenWizard }: { projects: Project[]; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onClose: () => void; onChanged: () => Promise<void>; onOpenWizard: () => void }) {
   const [name, setName] = useState('Synthetic demo'); const [path, setPath] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
   async function addProject(e: React.FormEvent) { e.preventDefault(); setSaving(true); setError(''); try { await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('') } catch (err) { setError(err instanceof Error ? err.message : 'Unable to add project') } finally { setSaving(false) } }
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <p className="form-error">{error}</p>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available && <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div>}</section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <p className="form-error">{error}</p>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available ? <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div> : <button className="primary small ollama-setup-button" onClick={onOpenWizard}><Download size={14}/>Set up Ollama</button>}</section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+}
+
+const ONBOARDING_STEPS: { id: OnboardingState['phase']; label: string }[] = [
+  { id: 'download_ollama', label: 'Download' },
+  { id: 'start_ollama', label: 'Start' },
+  { id: 'pull_model', label: 'Pull model' },
+  { id: 'ready', label: 'Ready' }
+]
+
+function OnboardingWizard({ onClose, onReady }: { onClose: () => void; onReady: () => Promise<void> }) {
+  const [state, setState] = useState<OnboardingState | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [copied, setCopied] = useState('')
+
+  const check = useCallback(async () => {
+    setChecking(true)
+    try {
+      const result = await api<OnboardingState>('/api/models/onboarding')
+      setState(result)
+      if (result.phase === 'ready') await onReady()
+    } catch {
+      // The API may be briefly unreachable; keep the last known state rather
+      // than blanking the wizard.
+    } finally {
+      setChecking(false)
+    }
+  }, [onReady])
+
+  useEffect(() => { void check() }, [check])
+
+  function copy(text: string, key: string) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => { /* clipboard permission denied; command stays visible to copy manually */ })
+    }
+    setCopied(key)
+    setTimeout(() => setCopied((current) => (current === key ? '' : current)), 1500)
+  }
+
+  const stepIndex = state ? ONBOARDING_STEPS.findIndex((step) => step.id === state.phase) : 0
+
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <section className="onboarding-modal" onMouseDown={(e) => e.stopPropagation()}>
+      <header>
+        <div><h2>Set up Ollama</h2><p>Optional — InMyAI runs in Safe Mock mode without it.</p></div>
+        <button className="icon-button" onClick={onClose} aria-label="Close"><X size={18}/></button>
+      </header>
+      <div className="onboarding-steps">
+        {ONBOARDING_STEPS.map((step, index) => (
+          <div key={step.id} className={`onboarding-step${index === stepIndex ? ' active' : ''}${index < stepIndex ? ' done' : ''}`}>
+            <span>{index < stepIndex ? <Check size={12}/> : index + 1}</span>{step.label}
+          </div>
+        ))}
+      </div>
+      <div className="onboarding-body">
+        {!state ? <p className="muted">Checking your machine…</p> : <>
+          {state.phase === 'download_ollama' && <div className="onboarding-panel">
+            <Download size={26}/>
+            <h3>Install Ollama</h3>
+            <p>Ollama runs local models on your device. InMyAI never uploads your files.</p>
+            <button className="primary" onClick={() => window.open('https://ollama.com/download', '_blank', 'noopener')}><ExternalLink size={15}/>Download Ollama</button>
+            <p className="helper">Already installed it? <button className="link-button" onClick={() => void check()}>Check again</button></p>
+          </div>}
+          {state.phase === 'start_ollama' && <div className="onboarding-panel">
+            <TerminalSquare size={26}/>
+            <h3>Start Ollama</h3>
+            <p>{state.version ? `Ollama ${state.version} is` : 'Ollama is'} installed but not running. Start it from the system tray, or run:</p>
+            <div className="code-row"><code>ollama serve</code><button className="icon-button" title="Copy command" onClick={() => copy('ollama serve', 'serve')}>{copied === 'serve' ? <Check size={14}/> : <Copy size={14}/>}</button></div>
+            <button className="primary" onClick={() => void check()} disabled={checking}>{checking ? <Loader2 className="spin" size={15}/> : <RefreshCw size={15}/>}Check again</button>
+          </div>}
+          {state.phase === 'pull_model' && <div className="onboarding-panel">
+            <HardDrive size={26}/>
+            <h3>Pull a model</h3>
+            <p>Recommended for your device ({state.hardware_profile} profile):</p>
+            {state.recommended.length ? <div className="recommend-list">
+              {state.recommended.map((rec) => <div className="recommend-card" key={rec.id}>
+                <div><strong>{rec.model}</strong><small>{rec.task_types.join(', ')}{rec.peak_ram_mb ? ` · ~${rec.peak_ram_mb} MB` : ''}</small></div>
+                <div className="code-row"><code>{rec.pull_command}</code><button className="icon-button" title="Copy command" onClick={() => copy(rec.pull_command, rec.id)}>{copied === rec.id ? <Check size={14}/> : <Copy size={14}/>}</button></div>
+              </div>)}
+            </div> : <p className="muted">No profile match yet for this device — you can still run, e.g. <code>ollama pull gemma3:1b</code>.</p>}
+            <button className="primary" onClick={() => void check()} disabled={checking}>{checking ? <Loader2 className="spin" size={15}/> : <RefreshCw size={15}/>}Check again</button>
+          </div>}
+          {state.phase === 'ready' && <div className="onboarding-panel">
+            <Check size={26}/>
+            <h3>Ollama is ready</h3>
+            <p>{state.models.length} model{state.models.length === 1 ? '' : 's'} installed. Pick "Ollama local" as the chat provider whenever you want it.</p>
+            <button className="primary" onClick={onClose}>Start using InMyAI</button>
+          </div>}
+        </>}
+      </div>
+      <footer className="onboarding-footer">
+        <button className="link-button" onClick={onClose}>Remind me later</button>
+        <button className="link-button" onClick={onClose}>Skip, use Safe Mock</button>
+      </footer>
+    </section>
+  </div>
 }
 
 function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) { return <nav className="mobile-nav">{nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={18}/><span>{item.label}</span></button> })}</nav> }

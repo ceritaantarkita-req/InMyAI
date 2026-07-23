@@ -75,7 +75,9 @@ Seed demo data:
 
 ## Using Ollama
 
-Install Ollama separately, download a model that fits the device, then start Ollama. Example model choices:
+The Workspace UI shows a setup wizard automatically the first time it detects Ollama is missing, not running, or has no model pulled yet — it walks through download → start → pull a recommended model, with each step re-checked on demand. It re-opens any time from **Settings → Set up Ollama**, and can be dismissed ("Remind me later") without blocking the rest of the app, which keeps running in Safe Mock mode.
+
+To do the same steps manually: install Ollama separately, download a model that fits the device, then start Ollama. Example model choices:
 
 - 8 GB RAM: 1B–2B Q4 class
 - 16 GB RAM: 3B–4B Q4 class

@@ -173,3 +173,17 @@ def select_model(
         return heuristic
 
     return requested or settings.ollama_model
+
+
+def recommend_for_hardware(hardware_profile: str) -> list[ModelProfile]:
+    """Profiles the onboarding wizard should suggest for a given hardware class.
+
+    Returns the registry's profiles whose hardware_profile matches, ordered so
+    that smaller-RAM models come first (best fit for the device). An unknown
+    hardware_profile yields an empty list rather than falling back, so the
+    wizard doesn't suggest a model that may not fit.
+    """
+    registry = get_registry()
+    matching = [p for p in registry if p.hardware_profile == hardware_profile]
+    matching.sort(key=lambda p: p.peak_ram_mb or 10**18)
+    return matching

@@ -10,3 +10,4 @@
 8. Document model licensing and whether data leaves the device.
 9. Measure RAM, latency, and output quality before calling the provider recommended.
 10. Update `docs/log.md`.
+11. If the provider has an install/run state a user can be stuck in (like Ollama: not installed → not running → no model pulled), extend `get_*_install_state()` and the `/api/models/onboarding` phase classification (`services/api/app/providers.py`, `main.py`) instead of adding a second, provider-specific onboarding flow — the wizard in `apps/web/src/components/Workspace.tsx` renders off that one endpoint.

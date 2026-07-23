@@ -19,3 +19,20 @@ export type ChatResponse = {
   model: string
   provider: string
 }
+export type ModelRecommendation = {
+  id: string
+  model: string
+  task_types: string[]
+  peak_ram_mb: number | null
+  pull_command: string
+  notes: string
+}
+export type OnboardingState = {
+  phase: 'download_ollama' | 'start_ollama' | 'pull_model' | 'ready'
+  installed: boolean
+  version: string | null
+  running: boolean
+  models: { name: string }[]
+  hardware_profile: string
+  recommended: ModelRecommendation[]
+}

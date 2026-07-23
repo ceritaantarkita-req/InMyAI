@@ -13,7 +13,7 @@ Date: 2026-07-23 (updated after the Explorer + Terminal tabs; earlier updates fr
 | Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
 | Next.js production build (`next build`) | PASS — see note below |
 | Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal tabs |
-| Tauri desktop shell (`cargo tauri dev`) | NOT RUN — no Rust toolchain and no Windows/WebView2 in this sandbox; everything checkable without Rust (npm install, tsc, tests, next build) is clean, but the first real compile+run needs your machine, see `docs/decisions/tauri-desktop-shell.md` |
+| Tauri desktop shell (`cargo tauri dev`) | PASS — confirmed on Windows: compiled clean, opened a real native window. One bug found and fixed on that first run (`allowedDevOrigins` in `next.config.mjs`), see `docs/decisions/tauri-desktop-shell.md` section 7 |
 
 `next build` was run against a copy of `apps/web` outside this sandbox's
 FUSE-mounted project folder (an `rsync` into `/tmp`, `node_modules` fetched

@@ -1,9 +1,9 @@
 # Decision record: Tauri desktop shell (first pass - dev mode + native folder picker)
 
 Date: 2026-07-24
-Status: scaffolded and verified as far as this sandbox allows; **first real
-run of `cargo tauri dev` still needs to happen on your Windows machine** -
-see section 5.
+Status: **confirmed working on Windows** - `cargo tauri dev` compiled
+cleanly (~2 minutes first run) and opened a real native `InMyAI` window.
+One follow-up bug found and fixed during that first run: see section 7.
 
 ## 1. The problem
 
@@ -99,11 +99,12 @@ here, since none of it depends on Rust:
   branding whenever you have it, via `npx tauri icon <path-to-a-1024px-png>`
   from `apps/web`, which regenerates every required size automatically).
 
-What could **not** be verified here and needs your machine: whether
-`cargo tauri dev` actually compiles and opens a working native window at
-all. That's a real, non-trivial first-run step (installing Rust and the
-Windows C++ build tools if you don't have them already), not something to
-assume works from config review alone.
+What could **not** be verified here and needed your machine: whether
+`cargo tauri dev` actually compiles and opens a working native window.
+**Confirmed working**: first run took ~2 minutes to compile all Rust
+dependencies, then opened a real `InMyAI` window with the app's UI visible
+inside it - exactly as designed. One real bug turned up at that point
+(client-side JS wasn't executing inside the window), fixed in section 7.
 
 ## 5. Exact steps to try this on your machine
 
@@ -149,3 +150,41 @@ npm run test:web
 Both should pass exactly as they did before this change - this pass adds a
 new, additive capability without touching any existing behavior in the
 plain-browser mode.
+
+## 7. Bug found on first real run: the window opened, but nothing was clickable
+
+**Symptom:** the native window opened and rendered the full Chat/Files/...
+UI correctly, but every button (including "Add project") was unresponsive.
+The dev-server terminal showed the actual cause:
+
+```
+Blocked cross-origin request to Next.js dev resource /_next/webpack-hmr
+from "127.0.0.1". Cross-origin access to Next.js dev resources is
+blocked by default for safety.
+```
+
+**Root cause:** Next.js's dev server blocks cross-origin requests to its
+own dev assets (webpack-hmr, JS chunks) by default, as a DNS-rebinding
+protection. A plain browser tab navigating to `http://127.0.0.1:3000`
+satisfies this check trivially; Tauri's webview loading that same URL
+(`tauri.conf.json`'s `devUrl`) apparently doesn't present as the same
+origin to Next's check, so it got blocked - which silently prevented
+React from ever finishing hydration. The page painted (server-rendered
+HTML is always sent regardless), but no client-side JS ever attached, so
+nothing was clickable. Exactly the kind of bug that's invisible without
+actually running it, which is why section 4 flagged this specific gap
+honestly instead of assuming success from config review.
+
+**Fix:** added `allowedDevOrigins: ['127.0.0.1', 'localhost']` to (a
+previously nonexistent, now added) `apps/web/next.config.mjs`, exactly as
+Next.js's own error message instructed. Doesn't affect the plain-browser
+path at all - it only widens which origins are trusted for dev assets,
+verified via `tsc --noEmit`, all 14 frontend tests, and a clean `next
+build`, then confirmed live in the desktop shell itself.
+
+**New files/folders from this first run, now tracked appropriately:**
+`apps/web/src-tauri/Cargo.lock` is committed on purpose (this is an
+application, not a library - a locked dependency tree is wanted, matching
+Tauri's own project template convention). `apps/web/src-tauri/gen/schemas/`
+(auto-regenerated capability/ACL JSON on every build) and `target/` (Rust
+build output) are gitignored, also matching Tauri's own template.

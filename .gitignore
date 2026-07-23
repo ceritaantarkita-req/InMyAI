@@ -32,6 +32,10 @@ Thumbs.db
 .test-runtime/
 
 # Tauri desktop shell build output (Rust compile artifacts, Next.js static
-# export used only for the packaged production build)
+# export used only for the packaged production build, and gen/schemas -
+# capability/ACL JSON schemas auto-regenerated on every build, per Tauri's
+# own project template). Cargo.lock IS committed on purpose - this is an
+# application, not a library, so a locked dependency tree is wanted.
 apps/web/src-tauri/target/
+apps/web/src-tauri/gen/schemas/
 apps/web/out/

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 test('core navigation lists the primary work surfaces without duplicates', () => {
-  const views = ['chat', 'files', 'memory', 'graph', 'studio', 'git']
+  const views = ['chat', 'files', 'memory', 'graph', 'studio', 'git', 'agents', 'explorer']
   assert.equal(new Set(views).size, views.length)
 })
 

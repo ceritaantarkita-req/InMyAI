@@ -42,3 +42,41 @@ def safe_join(project_root: Path, relative_path: str, *, must_exist: bool = True
     if project_root != candidate and project_root not in candidate.parents:
         raise ValueError('Path traversal is not allowed.')
     return resolve_allowed_path(str(candidate), must_exist=must_exist)
+
+
+def resolve_browsable_path(raw_path: str) -> Path:
+    """Resolve a directory for read-only browsing (the Explorer tab's mind-map).
+
+    Deliberately skips the allowed-roots check that `resolve_allowed_path`
+    enforces: on a single-user local machine, looking at folder *names* to
+    find a project is not a meaningful security boundary, and requiring an
+    `.env` whitelist edit just to look around defeats the point of a
+    discovery UI. The sensitive-path blocklist (BLOCKED_PARTS) still applies
+    unconditionally, since that protects against a different concern -
+    accidentally walking into credential/system directories - not
+    multi-tenant access control. Actually registering a project for indexing
+    still goes through `resolve_allowed_path` in `create_project`, so opening
+    a project's *contents* is unaffected by this relaxation.
+    """
+    path = Path(raw_path).expanduser().resolve()
+    if not path.exists():
+        raise ValueError(f'Path does not exist: {path}')
+    if not path.is_dir():
+        raise ValueError(f'Not a directory: {path}')
+    normalized = str(path).replace('\\', '/')
+    if any(part.lower() in normalized.lower() for part in BLOCKED_PARTS):
+        raise ValueError('This sensitive system or credential path is blocked by policy.')
+    return path
+
+
+PROJECT_MARKERS = {'.git', 'package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml'}
+
+
+def looks_like_project(path: Path) -> bool:
+    """Heuristic used only to visually flag a folder in the Explorer mind-map
+    (a differently-styled node) - it never blocks navigation. Cheap by
+    design: a handful of `exists()` calls, not a directory walk."""
+    try:
+        return any((path / marker).exists() for marker in PROJECT_MARKERS)
+    except OSError:
+        return False

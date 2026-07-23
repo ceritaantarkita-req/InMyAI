@@ -3,18 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
-  Bot, BrainCircuit, Check, Code2, Copy, Download, ExternalLink, FileCode2,
-  FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop, Loader2,
-  MemoryStick, MessageSquareText, Network, PlayCircle, Plus, RefreshCw, Save,
-  Search, Send, Settings, ShieldCheck, Sparkles, StopCircle, TerminalSquare,
-  Users, Workflow, X
+  Bot, BrainCircuit, Check, ChevronLeft, Code2, Copy, Download, ExternalLink,
+  FileCode2, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
+  Loader2, Map, MemoryStick, MessageSquareText, Network, PlayCircle, Plus,
+  RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
+  TerminalSquare, Users, Workflow, X
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
-import type { Agent, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
+import type { Agent, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
-type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents'
+type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents' | 'explorer'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
 
 const nav: { id: View; label: string; icon: typeof Bot }[] = [
@@ -24,7 +24,8 @@ const nav: { id: View; label: string; icon: typeof Bot }[] = [
   { id: 'graph', label: 'Graph', icon: Network },
   { id: 'studio', label: 'Studio', icon: Sparkles },
   { id: 'git', label: 'Git', icon: GitBranch },
-  { id: 'agents', label: 'Agents', icon: Workflow }
+  { id: 'agents', label: 'Agents', icon: Workflow },
+  { id: 'explorer', label: 'Explorer', icon: Map }
 ]
 
 export function Workspace() {
@@ -84,6 +85,18 @@ export function Workspace() {
     } finally { setBusy(false) }
   }
 
+  // Bridges the Explorer tab (browse-anywhere, no active project needed) back
+  // into the normal per-project experience: register the folder the user
+  // drilled down to, then switch straight into Chat for it.
+  async function registerProjectFromExplorer(path: string, name: string) {
+    setNotice('')
+    const created = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) })
+    await loadSystem()
+    setProjectId(created.id)
+    setView('chat')
+    setNotice(`"${created.name}" registered. Index it from the toolbar to start chatting with real context.`)
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -111,17 +124,23 @@ export function Workspace() {
           </div>
         </header>
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Close notice"><X size={15}/></button></div>}
-        {!project ? <EmptyProject onOpen={() => setSettingsOpen(true)}/> : (
-          <div className="content-area">
-            {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available}/>} 
-            {view === 'files' && <FilesView project={project}/>} 
-            {view === 'memory' && <MemoryView project={project}/>} 
-            {view === 'graph' && <GraphView project={project}/>}
-            {view === 'studio' && <StudioView project={project}/>}
-            {view === 'git' && <GitView project={project}/>}
-            {view === 'agents' && <AgentsView project={project}/>}
-          </div>
-        )}
+        <div className="content-area">
+          {view === 'explorer' ? (
+            <ExplorerView onOpenProject={registerProjectFromExplorer}/>
+          ) : !project ? (
+            <EmptyProject onOpen={() => setSettingsOpen(true)}/>
+          ) : (
+            <>
+              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available}/>}
+              {view === 'files' && <FilesView project={project}/>}
+              {view === 'memory' && <MemoryView project={project}/>}
+              {view === 'graph' && <GraphView project={project}/>}
+              {view === 'studio' && <StudioView project={project}/>}
+              {view === 'git' && <GitView project={project}/>}
+              {view === 'agents' && <AgentsView project={project}/>}
+            </>
+          )}
+        </div>
       </section>
 
       <ContextRail project={project} hardware={hardware} ollama={ollama} onOpenWizard={() => setWizardOpen(true)}/>
@@ -529,6 +548,154 @@ function AgentsView({ project }: { project: Project }) {
           </div>
         </div>
       </section>
+    </div>
+  )
+}
+
+const EXPLORER_ROOT_KEY = 'inmyai:explorer:lastRoot'
+type ExplorerSelection = { name: string; path: string; is_dir: boolean; is_project: boolean }
+
+function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: string) => Promise<void> }) {
+  const [rootInput, setRootInput] = useState('')
+  const [currentPath, setCurrentPath] = useState<string | null>(null)
+  const [parentPath, setParentPath] = useState<string | null>(null)
+  const [entries, setEntries] = useState<BrowseEntry[]>([])
+  const [history, setHistory] = useState<string[]>([])
+  const [selected, setSelected] = useState<ExplorerSelection | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [opening, setOpening] = useState(false)
+
+  const load = useCallback(async (path: string, nextHistory: string[]) => {
+    setLoading(true); setError('')
+    try {
+      const result = await api<BrowseResult>(`/api/browse?path=${encodeURIComponent(path)}`)
+      setCurrentPath(result.path)
+      setParentPath(result.parent)
+      setEntries(result.entries)
+      setHistory(nextHistory)
+      const name = result.path.split(/[\\/]/).filter(Boolean).pop() || result.path
+      setSelected({ name, path: result.path, is_dir: true, is_project: false })
+      setRootInput(result.path)
+      if (typeof window !== 'undefined') window.localStorage.setItem(EXPLORER_ROOT_KEY, result.path)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to browse this folder.')
+    } finally { setLoading(false) }
+  }, [])
+
+  // Resume the last folder explored on this device, if any.
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(EXPLORER_ROOT_KEY) : null
+    if (stored) void load(stored, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function goTo(path: string) {
+    if (!currentPath || path === currentPath) return
+    void load(path, [...history, currentPath])
+  }
+
+  function goBack() {
+    if (history.length) {
+      const next = [...history]
+      const previous = next.pop() as string
+      void load(previous, next)
+    } else if (parentPath) {
+      void load(parentPath, [])
+    }
+  }
+
+  function submitRoot(event: React.FormEvent) {
+    event.preventDefault()
+    if (rootInput.trim()) void load(rootInput.trim(), [])
+  }
+
+  function selectNode(entry: BrowseEntry) {
+    setSelected(entry)
+    if (entry.is_dir) goTo(entry.path)
+  }
+
+  async function openSelectedAsProject() {
+    if (!selected || !selected.is_dir || opening) return
+    setOpening(true); setError('')
+    try {
+      await onOpenProject(selected.path, selected.name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to register this folder as a project.')
+    } finally { setOpening(false) }
+  }
+
+  function copySelectedPath() {
+    if (!selected || typeof navigator === 'undefined' || !navigator.clipboard) return
+    navigator.clipboard.writeText(selected.path).catch(() => { /* clipboard permission denied */ })
+  }
+
+  const currentName = currentPath ? (currentPath.split(/[\\/]/).filter(Boolean).pop() || currentPath) : null
+
+  const positioned = useMemo(() => {
+    const total = entries.length || 1
+    return entries.map((entry, index) => {
+      const angle = (index / total) * Math.PI * 2 - Math.PI / 2
+      return { entry, x: 300 + 200 * Math.cos(angle), y: 235 + 200 * Math.sin(angle) }
+    })
+  }, [entries])
+
+  return (
+    <div className="explorer-layout">
+      <div className="explorer-toolbar">
+        <button className="icon-button" title="Back" onClick={goBack} disabled={!history.length && !parentPath}><ChevronLeft size={17}/></button>
+        <form onSubmit={submitRoot}>
+          <input value={rootInput} onChange={(event) => setRootInput(event.target.value)} placeholder="Absolute folder path to start exploring, e.g. C:\Users\you\projects"/>
+          <button className="primary small" disabled={!rootInput.trim() || loading}>{loading ? <Loader2 className="spin" size={14}/> : <Map size={14}/>}Explore</button>
+        </form>
+      </div>
+
+      {error && <div className="notice"><span>{error}</span><button onClick={() => setError('')} aria-label="Close notice"><X size={15}/></button></div>}
+
+      {!currentPath ? (
+        <div className="explorer-empty">
+          <Map size={34}/>
+          <h2>Explore your disk</h2>
+          <p>Paste an absolute folder path above to start. Browsing folder and file names never requires an allowed root - only opening a folder as a chat project does.</p>
+        </div>
+      ) : (
+        <div className="explorer-canvas-wrap">
+          {loading && <div className="explorer-loading"><Loader2 className="spin" size={22}/></div>}
+          {!loading && !entries.length && <p className="muted explorer-empty-folder">This folder is empty.</p>}
+          <svg className="explorer-canvas" viewBox="0 0 600 460" role="img" aria-label={`Contents of ${currentPath}`}>
+            {positioned.map(({ entry, x, y }) => (
+              <line key={`edge-${entry.path}`} x1={300} y1={235} x2={x} y2={y} className="explorer-edge"/>
+            ))}
+            <g className="explorer-node explorer-node-root" onClick={() => setSelected({ name: currentName || currentPath, path: currentPath, is_dir: true, is_project: false })}>
+              <circle cx={300} cy={235} r={32}/>
+              <text x={300} y={240} textAnchor="middle">{(currentName || '/').slice(0, 12)}</text>
+            </g>
+            {positioned.map(({ entry, x, y }) => (
+              <g
+                key={entry.path}
+                className={`explorer-node${entry.is_dir ? ' dir' : ' file'}${entry.is_project ? ' project' : ''}${selected?.path === entry.path ? ' selected' : ''}`}
+                onClick={() => selectNode(entry)}
+              >
+                <circle cx={x} cy={y} r={entry.is_dir ? 17 : 11}/>
+                <text x={x} y={y + 28} textAnchor="middle">{entry.name.length > 15 ? `${entry.name.slice(0, 13)}…` : entry.name}</text>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
+
+      {selected && (
+        <div className="explorer-floating-bar">
+          {selected.is_dir ? <FolderOpen size={14}/> : <FileText size={14}/>}
+          <code title={selected.path}>{selected.path}</code>
+          <button className="icon-button" title="Copy path" onClick={copySelectedPath}><Copy size={14}/></button>
+          {selected.is_dir && (
+            <button className="primary small" onClick={() => void openSelectedAsProject()} disabled={opening}>
+              {opening ? <Loader2 className="spin" size={13}/> : <FolderOpen size={13}/>}Open as project
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

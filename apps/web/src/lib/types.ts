@@ -73,3 +73,5 @@ export type AgentEvent = {
   created_at: string
 }
 export type TaskDetail = { task: Task; events: AgentEvent[] }
+export type BrowseEntry = { name: string; path: string; is_dir: boolean; is_project: boolean }
+export type BrowseResult = { path: string; parent: string | null; entries: BrowseEntry[]; truncated: boolean }

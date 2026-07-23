@@ -16,7 +16,7 @@ from .indexer import index_project
 from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_install_state, get_ollama_status
 from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
-from .security import safe_join
+from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_path, safe_join
 from .schemas import (
     AgentCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
     ProjectCreate, SearchRequest, TaskCreate, WriteProposalCreate
@@ -116,6 +116,53 @@ async def models_onboarding() -> dict:
 @app.get('/api/projects')
 def projects() -> list[dict]:
     return services.list_projects()
+
+
+_BROWSE_ENTRY_LIMIT = 1000
+
+
+@app.get('/api/browse')
+def browse(path: str = Query(...)) -> dict:
+    """Read-only directory listing for the Explorer tab's mind-map.
+
+    Intentionally not subject to INMYAI_ALLOWED_ROOTS - see
+    security.resolve_browsable_path for why. Lists folder AND file names
+    (never file contents) so a user can visually navigate their disk to find
+    a project before registering it with POST /api/projects, which still
+    enforces the normal allowed-roots policy.
+    """
+    try:
+        target = resolve_browsable_path(path)
+        raw_entries = sorted(
+            target.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower())
+        )
+        entries = []
+        truncated = False
+        for child in raw_entries:
+            if len(entries) >= _BROWSE_ENTRY_LIMIT:
+                truncated = True
+                break
+            if child.name.lower() in BLOCKED_FILENAMES or child.name.lower().startswith('.env'):
+                continue
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            entries.append({
+                'name': child.name,
+                'path': str(child),
+                'is_dir': is_dir,
+                'is_project': is_dir and looks_like_project(child),
+            })
+        parent = str(target.parent) if target.parent != target else None
+        return {'path': str(target), 'parent': parent, 'entries': entries, 'truncated': truncated}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f'Permission denied: {exc}') from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post('/api/projects')

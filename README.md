@@ -12,7 +12,8 @@ InMyAI is a lightweight, local-first AI workspace designed for everyday laptops 
 
 ## Working P0 capabilities
 
-- Next.js workspace UI with seven primary surfaces: Chat, Files, Memory, Graph, Studio, Git, Agents
+- Next.js workspace UI with eight primary surfaces: Chat, Files, Memory, Graph, Studio, Git, Agents, Explorer
+- Explorer: a mind-map style folder/file browser (`GET /api/browse`) for finding a project across your whole disk before registering it - browsing names never requires an allowed root, only opening a folder as a chat project does
 - A second, dependency-free UI (`apps/local-ui`, no Node/npm needed) served by the API itself at `/app/`
 - FastAPI local backend and SQLite/FTS5 persistence
 - Register and incrementally index explicitly allowed local folders

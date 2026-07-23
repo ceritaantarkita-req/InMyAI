@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
 import {
-  Bot, BrainCircuit, Check, ChevronLeft, Code2, Copy, Download, ExternalLink,
+  Bot, BrainCircuit, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink,
   FileCode2, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
   Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PlayCircle, Plus,
   RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
@@ -29,16 +29,21 @@ const TerminalView = dynamic(() => import('./TerminalView').then((mod) => mod.Te
 type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents' | 'explorer' | 'terminal'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
 
-const nav: { id: View; label: string; icon: typeof Bot }[] = [
+type NavItem = { id: View; label: string; icon: typeof Bot }
+
+const navMain: NavItem[] = [
   { id: 'chat', label: 'Chat', icon: MessageSquareText },
   { id: 'files', label: 'Files', icon: FileCode2 },
-  { id: 'memory', label: 'Memory', icon: BrainCircuit },
+  { id: 'explorer', label: 'Explorer', icon: MapIcon },
   { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'terminal', label: 'Terminal', icon: TerminalSquare }
+]
+
+const navAdvanced: NavItem[] = [
+  { id: 'memory', label: 'Memory', icon: BrainCircuit },
   { id: 'studio', label: 'Studio', icon: Sparkles },
   { id: 'git', label: 'Git', icon: GitBranch },
-  { id: 'agents', label: 'Agents', icon: Workflow },
-  { id: 'explorer', label: 'Explorer', icon: MapIcon },
-  { id: 'terminal', label: 'Terminal', icon: TerminalSquare }
+  { id: 'agents', label: 'Agents', icon: Workflow }
 ]
 
 function normalizePath(p: string): string {
@@ -80,6 +85,26 @@ export function Workspace() {
   const [wizardOpen, setWizardOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const ADVANCED_NAV_KEY = 'inmyai:nav:advancedExpanded'
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(ADVANCED_NAV_KEY) : null
+    setAdvancedOpen(stored === '1')
+  }, [])
+
+  useEffect(() => {
+    if (navAdvanced.some((item) => item.id === view)) setAdvancedOpen(true)
+  }, [view])
+
+  function toggleAdvanced() {
+    setAdvancedOpen((current) => {
+      const next = !current
+      if (typeof window !== 'undefined') window.localStorage.setItem(ADVANCED_NAV_KEY, next ? '1' : '0')
+      return next
+    })
+  }
 
   const project = projects.find((item) => item.id === projectId) || null
 
@@ -190,7 +215,18 @@ export function Workspace() {
           </select>
           {project && <small title={project.path}>{project.path}</small>}
         </div>
-        <nav>{nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={17}/><span>{item.label}</span></button> })}</nav>
+        <nav>
+          <div className="nav-group">
+            {navMain.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={17}/><span>{item.label}</span></button> })}
+          </div>
+          <div className="nav-group nav-group-advanced">
+            <button className="nav-group-header" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
+              <ChevronRight size={14} className={advancedOpen ? 'nav-chevron-open' : ''}/>
+              <span>Advanced</span>
+            </button>
+            {advancedOpen && navAdvanced.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={17}/><span>{item.label}</span></button> })}
+          </div>
+        </nav>
         <div className="sidebar-spacer"/>
         <button className="settings-button" onClick={() => setSettingsOpen(true)}><Settings size={17}/>Settings</button>
         <div className="local-status"><span className={ollama?.available ? 'status-dot online' : 'status-dot'}/><div><strong>{ollama?.available ? 'Ollama ready' : 'Safe mock mode'}</strong><small>{hardware ? `${hardware.profile} profile · ${hardware.ram.available_gb} GB free` : 'Checking hardware'}</small></div></div>
@@ -198,7 +234,7 @@ export function Workspace() {
 
       <section className="main-column">
         <header className="topbar">
-          <div><h1>{nav.find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : 'Add a local project to begin.'}</p></div>
+          <div><h1>{[...navMain, ...navAdvanced].find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : 'Add a local project to begin.'}</p></div>
           <div className="top-actions">
             <button className="icon-button" title="Index project" onClick={indexActiveProject} disabled={!project || busy}>{busy ? <Loader2 className="spin" size={18}/> : <RefreshCw size={18}/>}</button>
             <button className="icon-button" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
@@ -1108,5 +1144,8 @@ function OnboardingWizard({ onClose, onReady }: { onClose: () => void; onReady: 
   </div>
 }
 
-function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) { return <nav className="mobile-nav">{nav.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={18}/><span>{item.label}</span></button> })}</nav> }
+function MobileNav({ view, setView }: { view: View; setView: (view: View) => void }) {
+  const all = [...navMain, ...navAdvanced]
+  return <nav className="mobile-nav">{all.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><Icon size={18}/><span>{item.label}</span></button> })}</nav>
+}
 function formatBytes(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB` }

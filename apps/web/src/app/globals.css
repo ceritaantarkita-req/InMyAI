@@ -39,6 +39,10 @@ pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; whi
 .sidebar nav button:hover, .settings-button:hover { color: var(--text); background: #f0f2f5; }
 .sidebar nav button.active { color: #1558c8; background: #eaf2ff; box-shadow: inset 2px 0 #2d72e8; }
 .sidebar-spacer { flex: 1; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-group-advanced { margin-top: 8px; border-top: 1px solid rgba(0,0,0,0.08); padding-top: 8px; }
+.nav-group-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; background: none; border: none; color: inherit; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; cursor: pointer; }
+.nav-chevron-open { transform: rotate(90deg); transition: transform 0.15s ease; }
 .settings-button { margin-bottom: 10px; }
 .local-status { display: flex; gap: 9px; align-items: flex-start; padding: 11px 9px; border-top: 1px solid var(--line); }
 .local-status strong, .local-status small { display: block; }

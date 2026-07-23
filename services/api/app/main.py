@@ -19,7 +19,7 @@ from .router_engine import route, to_dict
 from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_path, safe_join
 from . import terminal as terminal_module
 from .schemas import (
-    AgentCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
+    AgentCreate, AllowedRootCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
     ProjectCreate, SearchRequest, TaskCreate, WriteProposalCreate
 )
 from . import services
@@ -28,6 +28,11 @@ from . import agent_runtime
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     migrate()
+    # Restores allowed roots added through the Settings UI in a previous
+    # run - they live in the `allowed_roots` table, not `.env`, so the
+    # in-memory `settings.allowed_roots` needs to be rebuilt from the DB on
+    # every process start.
+    services.sync_allowed_roots()
     yield
 
 
@@ -180,6 +185,31 @@ async def terminal_ws(websocket: WebSocket, path: str = '.') -> None:
     except ValueError:
         cwd = str(Path.cwd())
     await terminal_module.run_terminal_session(websocket, cwd=cwd)
+
+
+@app.get('/api/settings/allowed-roots')
+def get_allowed_roots() -> list[dict]:
+    """Every folder currently accepted by POST /api/projects, from all three
+    sources (see services.list_allowed_roots): the workspace root, whatever
+    INMYAI_ALLOWED_ROOTS says in .env (read-only here), and whatever has
+    been added at runtime through this endpoint (deletable). Lets the
+    Settings UI show and manage this without anyone touching .env by hand.
+    """
+    return services.list_allowed_roots()
+
+
+@app.post('/api/settings/allowed-roots')
+def add_allowed_root(payload: AllowedRootCreate) -> dict:
+    try:
+        return services.add_allowed_root(payload.path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete('/api/settings/allowed-roots/{root_id}')
+def delete_allowed_root(root_id: int) -> dict:
+    services.remove_allowed_root(root_id)
+    return {'ok': True}
 
 
 @app.post('/api/projects')

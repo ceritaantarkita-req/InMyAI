@@ -11,7 +11,7 @@ Updated 2026-07-23 after the v1/v2 merge, the Agents Workspace panel, the
 - Secondary UI: `apps/local-ui`, dependency-free, served by the API at `/app/` — kept permanently as a lightweight fallback
 - Backend: FastAPI + SQLite FTS5, multi-agent task orchestration (`agent_runtime.py`: Coordinator/Researcher/Worker/Verifier), mind-map folder browsing (`GET /api/browse`), interactive terminal PTY relay (`/ws/terminal`)
 - Frontend tests: 14 passed
-- API tests: 107 passed
+- API tests: 115 passed
 - In-process smoke check: passed (`scripts/smoke_check.py`, see `SMOKE_REPORT.json`)
 - Engine simulation x3: passed (`scripts/simulate_engine.py`, see `docs/qa/ENGINE_SIMULATION_3X.json`)
 - Next.js production build: passed this session (built from an `/tmp` copy outside the sandbox's mounted folder — see `QA_REPORT.md`); run `npm run build` on your own machine too, it has no such constraint

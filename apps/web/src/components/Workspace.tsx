@@ -13,7 +13,7 @@ import {
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
-import type { Agent, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
+import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
 // load time, which crashes Next.js's server-side render pass if bundled
@@ -720,8 +720,50 @@ function ContextRail({ project, hardware, ollama, onOpenWizard }: { project: Pro
 
 function SettingsModal({ projects, hardware, ollama, onClose, onChanged, onOpenWizard }: { projects: Project[]; hardware: Hardware | null; ollama: { available: boolean; models: { name: string }[]; error?: string } | null; onClose: () => void; onChanged: () => Promise<void>; onOpenWizard: () => void }) {
   const [name, setName] = useState('Synthetic demo'); const [path, setPath] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
-  async function addProject(e: React.FormEvent) { e.preventDefault(); setSaving(true); setError(''); try { await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('') } catch (err) { setError(err instanceof Error ? err.message : 'Unable to add project') } finally { setSaving(false) } }
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <p className="form-error">{error}</p>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available ? <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div> : <button className="primary small ollama-setup-button" onClick={onOpenWizard}><Download size={14}/>Set up Ollama</button>}</section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+  const [allowedRoots, setAllowedRoots] = useState<AllowedRoot[]>([])
+  const [newRoot, setNewRoot] = useState(''); const [rootError, setRootError] = useState(''); const [addingRoot, setAddingRoot] = useState(false)
+
+  const loadAllowedRoots = useCallback(async () => {
+    try { setAllowedRoots(await api<AllowedRoot[]>('/api/settings/allowed-roots')) } catch { /* shown elsewhere if the API is down; this list just stays empty */ }
+  }, [])
+  useEffect(() => { void loadAllowedRoots() }, [loadAllowedRoots])
+
+  async function addProject(e: React.FormEvent) {
+    e.preventDefault(); setSaving(true); setError('')
+    try { await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('') }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to add project') }
+    finally { setSaving(false) }
+  }
+
+  // The one-click fix for the single most common first-run error: instead
+  // of sending someone to edit .env and restart the server by hand, this
+  // whitelists the exact path they just typed and immediately retries the
+  // same registration in place.
+  async function allowFolderAndRetry() {
+    setSaving(true); setError('')
+    try {
+      await api('/api/settings/allowed-roots', { method: 'POST', body: JSON.stringify({ path }) })
+      await loadAllowedRoots()
+      await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) })
+      await onChanged(); setName(''); setPath('')
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to allow this folder') }
+    finally { setSaving(false) }
+  }
+
+  async function addAllowedRoot(e: React.FormEvent) {
+    e.preventDefault(); setAddingRoot(true); setRootError('')
+    try { await api('/api/settings/allowed-roots', { method: 'POST', body: JSON.stringify({ path: newRoot }) }); await loadAllowedRoots(); setNewRoot('') }
+    catch (err) { setRootError(err instanceof Error ? err.message : 'Unable to allow this folder') }
+    finally { setAddingRoot(false) }
+  }
+
+  async function removeAllowedRoot(id: number) {
+    try { await api(`/api/settings/allowed-roots/${id}`, { method: 'DELETE' }); await loadAllowedRoots() } catch { /* list just won't update; user can retry */ }
+  }
+
+  const isOutsideRootsError = /allowed roots/i.test(error)
+
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <div className="form-error-block"><p className="form-error">{error}</p>{isOutsideRootsError && <button type="button" className="link-button" onClick={() => void allowFolderAndRetry()} disabled={saving}>Allow this folder & retry</button>}</div>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available ? <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div> : <button className="primary small ollama-setup-button" onClick={onOpenWizard}><Download size={14}/>Set up Ollama</button>}</section><section className="wide"><h3>Allowed folders</h3><p className="helper">Folders InMyAI is allowed to open as a project. The workspace folder is always allowed; folders added here take effect immediately - no .env editing or restart needed.</p><div className="allowed-roots-list">{allowedRoots.map((root) => <div className="allowed-root-row" key={`${root.source}-${root.path}`}><FolderOpen size={15}/><span title={root.path}>{root.path}</span><small>{root.source === 'workspace' ? 'workspace' : root.source === 'env' ? '.env' : 'added'}</small>{root.id !== null && <button className="icon-button" title="Remove" onClick={() => void removeAllowedRoot(root.id!)}><X size={13}/></button>}</div>)}</div><form className="inline-form" onSubmit={addAllowedRoot}><input value={newRoot} onChange={(e) => setNewRoot(e.target.value)} placeholder="C:\\dev or /home/me/projects"/>{rootError && <p className="form-error">{rootError}</p>}<button className="primary small" disabled={addingRoot}>{addingRoot ? <Loader2 className="spin" size={14}/> : <Plus size={14}/>}Allow folder</button></form></section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
 }
 
 const ONBOARDING_STEPS: { id: OnboardingState['phase']; label: string }[] = [

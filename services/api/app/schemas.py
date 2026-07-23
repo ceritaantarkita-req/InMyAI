@@ -9,6 +9,10 @@ class ProjectCreate(BaseModel):
     path: str = Field(min_length=1)
 
 
+class AllowedRootCreate(BaseModel):
+    path: str = Field(min_length=1)
+
+
 class ChatRequest(BaseModel):
     project_id: int
     message: str = Field(min_length=1, max_length=20_000)

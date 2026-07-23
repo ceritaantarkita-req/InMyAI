@@ -75,3 +75,4 @@ export type AgentEvent = {
 export type TaskDetail = { task: Task; events: AgentEvent[] }
 export type BrowseEntry = { name: string; path: string; is_dir: boolean; is_project: boolean }
 export type BrowseResult = { path: string; parent: string | null; entries: BrowseEntry[]; truncated: boolean }
+export type AllowedRoot = { id: number | null; source: 'workspace' | 'env' | 'dynamic'; path: string; created_at: string | null }

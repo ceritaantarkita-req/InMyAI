@@ -8,7 +8,7 @@ Date: 2026-07-23 (updated after the Explorer + Terminal tabs; earlier updates fr
 |---|---|
 | Strict TypeScript (`tsc --noEmit`) | PASS |
 | Frontend tests (`node --test`) | 14/14 PASS |
-| FastAPI tests (`pytest services/api/tests`) | 107/107 PASS |
+| FastAPI tests (`pytest services/api/tests`) | 115/115 PASS |
 | In-process API smoke check (`scripts/smoke_check.py`) | PASS — see `SMOKE_REPORT.json` |
 | Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
 | Next.js production build (`next build`) | PASS — see note below |
@@ -25,15 +25,16 @@ actually verifies the build, not a substitute for it. Your own machine's
 normal filesystem doesn't have this constraint; `npm run build` there
 should just work.
 
-The 107 backend tests include everything from the original P0 build plus
+The 115 backend tests include everything from the original P0 build plus
 regression coverage added since: multi-agent task orchestration
 (`test_agent_runtime.py`), PPTX indexing (`test_office_indexing.py`),
 stale-write detection (`test_core.py`), the dependency-free `apps/local-ui`
 static mount (`test_local_ui.py`), the `INMYAI_*` env-prefix binding fix
 (`test_config.py`), the mind-map browse endpoint (`test_browse.py`, 8
-tests), and the interactive terminal's `PtySession` (`test_terminal.py`, 5
-tests). `test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
-blame) is part of that 107 and passes cleanly on a normal filesystem; see
+tests), the interactive terminal's `PtySession` (`test_terminal.py`, 5
+tests), and the UI-managed allowed-roots settings (`test_allowed_roots.py`,
+8 tests). `test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
+blame) is part of that 115 and passes cleanly on a normal filesystem; see
 the note in `docs/decisions/v1-v2-merge-and-agents-panel.md` if it fails
 specifically inside a FUSE-mounted sandbox directory — that is an
 environment artifact, not a code defect.
@@ -56,9 +57,17 @@ environment artifact, not a code defect.
   your default shell on POSIX) over a WebSocket PTY relay
   (`/ws/terminal`) — explicitly not sandboxed.
 - The app now has nine primary surfaces instead of five.
+- Fixed a real Terminal crash (`Cannot read properties of undefined
+  (reading 'dimensions')`) caused by a dev-mode React Strict Mode /
+  xterm.js dispose race, and a misleading "Add a local project to begin."
+  subtitle shown on the two tabs that don't need one.
+- Added a Settings UI (`GET/POST/DELETE /api/settings/allowed-roots`) to
+  manage allowed project folders without editing `.env` or restarting -
+  including a one-click "Allow this folder & retry" fix inline in the
+  registration error itself.
 
-Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`
-and `docs/decisions/explorer-and-terminal.md`.
+Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`,
+`docs/decisions/explorer-and-terminal.md`, and `docs/decisions/allowed-roots-ui.md`.
 
 ## Smoke workflow
 
@@ -119,4 +128,4 @@ No unapproved marketing hero, decorative eyebrow, fake metric, or capability cla
 
 ## Conclusion
 
-Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, and the interactive Terminal all pass their automated tests (107 backend + 14 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.
+Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, and the interactive Terminal all pass their automated tests (115 backend + 14 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.

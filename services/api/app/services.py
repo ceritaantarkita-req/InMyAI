@@ -7,6 +7,7 @@ import os
 import random
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from datetime import datetime
@@ -20,7 +21,69 @@ from pypdf import PdfReader
 
 from .config import settings
 from .database import connect, row_to_dict, transaction, utc_now
-from .security import resolve_allowed_path, safe_join
+from .security import BLOCKED_PARTS, resolve_allowed_path, safe_join
+
+# The env-configured allowed roots, captured once at process start-up,
+# before anything below ever mutates `settings.allowed_roots` in memory.
+# Every add/remove of a dynamic (UI-managed) root rebuilds
+# `settings.allowed_roots` from this fixed baseline plus the current
+# `allowed_roots` DB rows, rather than editing the string incrementally -
+# that keeps repeated add/remove cycles from drifting or duplicating
+# entries, and keeps `.env`'s own setting authoritative and untouched.
+_ENV_ALLOWED_ROOTS = settings.allowed_roots
+
+
+def sync_allowed_roots() -> None:
+    """Rebuild `settings.allowed_roots` from the env baseline plus whatever
+    is currently in the `allowed_roots` table. `resolve_allowed_path`
+    (security.py) reads `settings.allowed_roots` fresh on every call, so
+    this takes effect immediately for the running process - no restart
+    needed. Called once at API startup (to restore roots added in a
+    previous run) and again after every add/remove."""
+    with connect() as conn:
+        rows = conn.execute('SELECT path FROM allowed_roots').fetchall()
+    dynamic_paths = [row['path'] for row in rows]
+    settings.allowed_roots = os.pathsep.join(p for p in [_ENV_ALLOWED_ROOTS, *dynamic_paths] if p)
+
+
+def list_allowed_roots() -> list[dict]:
+    """Every folder InMyAI will currently accept for `POST /api/projects`,
+    from all three sources: the always-allowed workspace root, whatever
+    `INMYAI_ALLOWED_ROOTS` set in `.env` (read-only from the UI - it only
+    changes by editing `.env` and restarting), and whatever has been added
+    at runtime through this settings UI (deletable)."""
+    workspace = [{'id': None, 'source': 'workspace', 'path': str(settings.workspace_root.resolve()), 'created_at': None}]
+    env_roots = [
+        {'id': None, 'source': 'env', 'path': item.strip(), 'created_at': None}
+        for item in _ENV_ALLOWED_ROOTS.split(os.pathsep) if item.strip()
+    ]
+    with connect() as conn:
+        rows = conn.execute('SELECT id, path, created_at FROM allowed_roots ORDER BY created_at').fetchall()
+    dynamic_roots = [{**dict(row), 'source': 'dynamic'} for row in rows]
+    return workspace + env_roots + dynamic_roots
+
+
+def add_allowed_root(raw_path: str) -> dict:
+    path = Path(raw_path).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
+        raise ValueError(f'Not a directory: {path}')
+    normalized = str(path).replace('\\', '/')
+    if any(part.lower() in normalized.lower() for part in BLOCKED_PARTS):
+        raise ValueError('This sensitive system or credential path is blocked by policy.')
+    now = utc_now()
+    with transaction() as conn:
+        try:
+            conn.execute('INSERT INTO allowed_roots(path, created_at) VALUES(?, ?)', (str(path), now))
+        except sqlite3.IntegrityError:
+            pass  # already allowed - adding it again is a harmless no-op, not an error
+    sync_allowed_roots()
+    return {'path': str(path)}
+
+
+def remove_allowed_root(root_id: int) -> None:
+    with transaction() as conn:
+        conn.execute('DELETE FROM allowed_roots WHERE id = ?', (root_id,))
+    sync_allowed_roots()
 
 
 def list_projects() -> list[dict]:

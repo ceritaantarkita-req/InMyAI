@@ -166,6 +166,11 @@ def migrate() -> None:
                 data_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS allowed_roots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
             '''
         )
         # Additive, idempotent column migrations for databases created before

@@ -4,7 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +17,7 @@ from .providers import MockProvider, OllamaProvider, ProviderResult, choose_olla
 from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
 from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_path, safe_join
+from . import terminal as terminal_module
 from .schemas import (
     AgentCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
     ProjectCreate, SearchRequest, TaskCreate, WriteProposalCreate
@@ -163,6 +164,22 @@ def browse(path: str = Query(...)) -> dict:
         raise HTTPException(status_code=403, detail=f'Permission denied: {exc}') from exc
     except OSError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.websocket('/ws/terminal')
+async def terminal_ws(websocket: WebSocket, path: str = '.') -> None:
+    """Interactive local terminal (real PTY, see terminal.py) rooted at
+    `path` if it resolves to a real directory, else the API process's own
+    cwd. Not subject to INMYAI_ALLOWED_ROOTS, same reasoning as /api/browse:
+    a local terminal already has, by definition, at least as much access as
+    your OS user account - restricting its starting directory would not add
+    real protection, only friction.
+    """
+    try:
+        cwd = str(resolve_browsable_path(path))
+    except ValueError:
+        cwd = str(Path.cwd())
+    await terminal_module.run_terminal_session(websocket, cwd=cwd)
 
 
 @app.post('/api/projects')

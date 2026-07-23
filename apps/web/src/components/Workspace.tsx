@@ -129,7 +129,7 @@ export function Workspace() {
 
       <section className="main-column">
         <header className="topbar">
-          <div><h1>{nav.find((item) => item.id === view)?.label}</h1><p>{project ? project.name : 'Add a local project to begin.'}</p></div>
+          <div><h1>{nav.find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : 'Add a local project to begin.'}</p></div>
           <div className="top-actions">
             <button className="icon-button" title="Index project" onClick={indexActiveProject} disabled={!project || busy}>{busy ? <Loader2 className="spin" size={18}/> : <RefreshCw size={18}/>}</button>
             <button className="icon-button" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>

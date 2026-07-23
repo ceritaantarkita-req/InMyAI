@@ -58,6 +58,7 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
 
   useEffect(() => {
     if (!containerRef.current || termRef.current) return
+    let disposed = false
     const term = new XTerm({
       convertEol: true,
       fontSize: 12,
@@ -67,8 +68,22 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(containerRef.current)
-    fit.fit()
     termRef.current = term
+
+    // The first fit() is deferred to the next animation frame instead of
+    // being called synchronously right after term.open(): xterm's renderer
+    // needs one real layout/paint pass before FitAddon can safely measure
+    // character dimensions, and fitting too early is a documented source
+    // of "Cannot read properties of undefined (reading 'dimensions')"
+    // crashes. This is what you hit - Next.js dev mode's React Strict Mode
+    // double-invokes this effect (mount -> cleanup -> mount again), which
+    // makes that race far easier to trigger locally than it would be in a
+    // normal single-mount production build, but it's worth guarding
+    // against unconditionally rather than relying on StrictMode being off.
+    const raf = requestAnimationFrame(() => {
+      if (disposed) return
+      fit.fit()
+    })
 
     const dataSubscription = term.onData((data: string) => {
       const socket = socketRef.current
@@ -78,6 +93,12 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
     connect(pathInput)
 
     const resizeObserver = new ResizeObserver(() => {
+      // Guard against a queued resize callback firing after this effect
+      // instance was already torn down (StrictMode double-invoke, or a
+      // fast tab switch away from Terminal) - calling fit()/reading
+      // term.cols on an already-disposed terminal is exactly what throws
+      // the "reading 'dimensions'" error seen in the dev overlay.
+      if (disposed || termRef.current !== term) return
       fit.fit()
       const socket = socketRef.current
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
@@ -85,11 +106,13 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
     resizeObserver.observe(containerRef.current)
 
     return () => {
+      disposed = true
+      cancelAnimationFrame(raf)
       dataSubscription.dispose()
       resizeObserver.disconnect()
       socketRef.current?.close()
       term.dispose()
-      termRef.current = null
+      if (termRef.current === term) termRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

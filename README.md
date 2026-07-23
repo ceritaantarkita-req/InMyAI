@@ -38,6 +38,16 @@ InMyAI is a lightweight, local-first AI workspace designed for everyday laptops 
 - One-heavy-engine-at-a-time architecture
 - English-first interface with straightforward i18n extension path
 
+## One-command install — Windows
+
+Once this repo is pushed to GitHub (replace `<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>` in the command below with the real path), anyone with Git, Node.js, and Python already on their machine can set up and launch InMyAI with a single PowerShell command:
+
+```powershell
+irm https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/install.ps1 | iex
+```
+
+This clones the repo into `%USERPROFILE%\InMyAI` (or updates it in place if it's already there), runs the same setup `npm run setup` does below, and starts `npm run dev` automatically. See `install.ps1` for exactly what it does — it's a plain, readable script, not an opaque binary.
+
 ## Quick start — Windows
 
 Requirements:

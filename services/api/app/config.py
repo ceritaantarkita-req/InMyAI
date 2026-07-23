@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ollama_model: str = 'gemma3:4b'
     comfyui_base_url: str = 'http://127.0.0.1:8188'
     comfyui_workflow_path: str = ''
+    diffusers_model_id: str = 'stabilityai/sd-turbo'
     model_registry_path: Path = Path('models/registry.json')
     idle_model_timeout_seconds: int = 300
 

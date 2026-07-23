@@ -61,4 +61,4 @@ class ImageRequest(BaseModel):
     height: int = Field(default=512, ge=256, le=1024)
     steps: int = Field(default=4, ge=1, le=30)
     seed: int = -1
-    provider: Literal['simulator', 'comfyui'] = 'simulator'
+    provider: Literal['simulator', 'comfyui', 'diffusers'] = 'simulator'

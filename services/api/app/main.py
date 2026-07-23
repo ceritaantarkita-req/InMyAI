@@ -13,7 +13,7 @@ from .database import connect, migrate, transaction, utc_now
 from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
 from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_status
-from .image_provider import generate_with_comfyui
+from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
 from .security import safe_join
 from .schemas import (
@@ -233,12 +233,17 @@ async def generate_image(payload: ImageRequest) -> dict:
         raise HTTPException(status_code=503, detail='Available RAM is below the 1.5 GB safety threshold.')
     if payload.provider == 'simulator':
         return services.simulate_image(payload.project_id, payload.prompt, payload.width, payload.height, payload.seed)
+    # Both real backends are heavy; best-effort release the chat model first.
     try:
-        # Best effort: release the configured chat model before loading an image workflow.
-        try:
-            await OllamaProvider().unload()
-        except Exception:
-            pass
+        await OllamaProvider().unload()
+    except Exception:
+        pass
+    try:
+        if payload.provider == 'diffusers':
+            return generate_with_diffusers(
+                payload.project_id, payload.prompt, payload.negative_prompt,
+                payload.width, payload.height, payload.steps, payload.seed
+            )
         return await generate_with_comfyui(
             payload.project_id, payload.prompt, payload.negative_prompt,
             payload.width, payload.height, payload.steps, payload.seed

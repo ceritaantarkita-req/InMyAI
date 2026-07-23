@@ -6,13 +6,28 @@ The core includes a deterministic workflow simulator. Its output is clearly labe
 
 ## Real backend options
 
-### Optional Diffusers plugin
+### Optional Diffusers backend
+
+The Diffusers plugin is wired into the API as `provider='diffusers'` (selectable
+from the Studio tab). It imports torch/diffusers lazily at request time, so the
+core still starts and runs without them installed.
+
+To enable real local generation:
 
 ```bash
 .venv/bin/pip install -r services/api/requirements-image.txt
 ```
 
-See `plugins/image_generation/diffusers_plugin.py`. It defaults to a low-step 512×512 workflow and unloads the pipeline after generation. Model download and license acceptance remain the user's responsibility.
+Then set the model id (optional; defaults to SD-Turbo, a 4-step distilled model):
+
+```env
+INMYAI_DIFFUSERS_MODEL_ID=stabilityai/sd-turbo
+```
+
+If the optional packages are not installed, a request with `provider='diffusers'`
+returns HTTP 400 with a pointer to `requirements-image.txt` rather than a 500.
+The plugin runs a low-step 512×512 workflow and unloads the pipeline after
+generation. Model download and license acceptance remain the user's responsibility.
 
 ### ComfyUI
 

@@ -12,8 +12,9 @@ InMyAI is a lightweight, local-first AI workspace designed for everyday laptops 
 
 ## Working P0 capabilities
 
-- Next.js workspace UI with eight primary surfaces: Chat, Files, Memory, Graph, Studio, Git, Agents, Explorer
+- Next.js workspace UI with nine primary surfaces: Chat, Files, Memory, Graph, Studio, Git, Agents, Explorer, Terminal
 - Explorer: a mind-map style folder/file browser (`GET /api/browse`) for finding a project across your whole disk before registering it - browsing names never requires an allowed root, only opening a folder as a chat project does
+- Terminal: a real interactive shell (PowerShell on Windows, bash/sh on POSIX) over a local WebSocket (`/ws/terminal`) - not sandboxed, same access as any terminal window you'd open yourself. Requires `pip install pywinpty` on Windows and `npm install` for `@xterm/xterm` on the frontend
 - A second, dependency-free UI (`apps/local-ui`, no Node/npm needed) served by the API itself at `/app/`
 - FastAPI local backend and SQLite/FTS5 persistence
 - Register and incrementally index explicitly allowed local folders

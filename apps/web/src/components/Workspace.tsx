@@ -14,7 +14,7 @@ import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
 import { isTauri, pickFolderNative } from '@/lib/tauri'
-import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
+import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
 // load time, which crashes Next.js's server-side render pass if bundled
@@ -40,6 +40,31 @@ const nav: { id: View; label: string; icon: typeof Bot }[] = [
   { id: 'explorer', label: 'Explorer', icon: Map },
   { id: 'terminal', label: 'Terminal', icon: TerminalSquare }
 ]
+
+async function confirmWideFolder(path: string): Promise<'continue' | 'cancel' | 'normal'> {
+  // Returns 'normal' when no gate is needed, 'continue'/'cancel' after the
+  // user responds to a dangerous-folder modal. A large-but-safe folder shows
+  // only a non-blocking console notice and returns 'normal'. The large_folder
+  // verdict comes straight from the backend (single source of truth) rather
+  // than re-deriving a threshold client-side.
+  let scope: FolderScope
+  try {
+    scope = await api<FolderScope>(`/api/projects/scope?path=${encodeURIComponent(path)}`)
+  } catch {
+    return 'normal' // can't classify; let POST validation surface any real error
+  }
+  if (scope.is_dangerous) {
+    const label = scope.dangerous_match || 'a system folder'
+    const ok = window.confirm(
+      `"${path}" looks like ${label}. Registering it will index everything inside. Continue?`
+    )
+    return ok ? 'continue' : 'cancel'
+  }
+  if (scope.large_folder) {
+    console.info(`[InMyAI] Folder has ${scope.direct_subdirs} subfolders; indexing may take a while.`)
+  }
+  return 'normal'
+}
 
 export function Workspace() {
   const [view, setView] = useState<View>('chat')
@@ -140,11 +165,13 @@ export function Workspace() {
   // drilled down to, then switch straight into Chat for it.
   async function registerProjectFromExplorer(path: string, name: string) {
     setNotice('')
+    const gate = await confirmWideFolder(path)
+    if (gate === 'cancel') return
     const created = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) })
     await loadSystem()
     setProjectId(created.id)
     setView('chat')
-    setNotice(`"${created.name}" registered. Index it from the toolbar to start chatting with real context.`)
+    setNotice(`"${created.name}" registered. Indexing in the background — chat will use it once ready.`)
   }
 
   return (
@@ -789,7 +816,11 @@ function SettingsModal({ projects, hardware, ollama, onClose, onChanged, onOpenW
 
   async function addProject(e: React.FormEvent) {
     e.preventDefault(); setSaving(true); setError('')
-    try { await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('') }
+    try {
+      const gate = await confirmWideFolder(path)
+      if (gate === 'cancel') { setSaving(false); return }
+      await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, path }) }); await onChanged(); setName(''); setPath('')
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'Unable to add project') }
     finally { setSaving(false) }
   }

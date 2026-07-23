@@ -213,6 +213,17 @@ def delete_allowed_root(root_id: int) -> dict:
     return {'ok': True}
 
 
+@app.get('/api/projects/scope')
+def project_scope(path: str = Query(...)) -> dict:
+    """Pre-registration guardrail classification for a folder path.
+
+    Used by both registration flows (Settings modal and Explorer 'Open as
+    project') to decide whether to show a confirmation dialog (dangerous) or a
+    non-blocking notice (very large folder). Does not mutate anything.
+    """
+    return services.classify_folder_scope(path)
+
+
 @app.post('/api/projects')
 def create_project(payload: ProjectCreate, background_tasks: BackgroundTasks) -> dict:
     try:

@@ -125,6 +125,60 @@ def get_project(project_id: int) -> dict:
     return dict(row)
 
 
+_DANGEROUS_FOLDER_NAMES = {'documents', 'desktop', 'downloads', 'home', 'users', 'windows'}
+_DANGEROUS_FOLDER_PREFIXES = ('program files', 'program files (x86)')
+
+
+def classify_folder_scope(raw_path: str) -> dict:
+    """Classify a folder before registration to guard against accidental
+    'register everything' mistakes.
+
+    Returns:
+        is_dangerous: True only for system/profile/drive-root targets.
+        dangerous_match: short label of what matched, or None.
+        direct_subdirs: count of immediate subdirectories.
+        large_folder: True when direct_subdirs exceeds the non-blocking
+            notice threshold (the user may still proceed).
+    """
+    try:
+        path = Path(raw_path).expanduser().resolve()
+    except (OSError, ValueError):
+        return {'is_dangerous': False, 'dangerous_match': None, 'direct_subdirs': 0, 'large_folder': False}
+
+    is_dangerous = False
+    dangerous_match: str | None = None
+
+    # `path == path.parent` is true for both POSIX filesystem root (/) and
+    # Windows drive roots (C:\) — they have no parent. The drive label just
+    # makes the user-facing message more specific.
+    if path == path.parent:
+        is_dangerous = True
+        dangerous_match = 'drive root' if path.drive else 'filesystem root'
+    else:
+        final = path.name.lower()
+        if final in _DANGEROUS_FOLDER_NAMES:
+            is_dangerous, dangerous_match = True, path.name
+        elif any(final.startswith(p) for p in _DANGEROUS_FOLDER_PREFIXES):
+            is_dangerous, dangerous_match = True, path.name
+        elif path == Path.home():
+            is_dangerous, dangerous_match = True, 'user profile root'
+
+    direct_subdirs = 0
+    try:
+        if path.is_dir():
+            direct_subdirs = sum(1 for child in path.iterdir() if child.is_dir())
+    except (OSError, PermissionError):
+        direct_subdirs = 0
+
+    LARGE_FOLDER_THRESHOLD = 20
+    return {
+        'is_dangerous': is_dangerous,
+        'dangerous_match': dangerous_match,
+        'direct_subdirs': direct_subdirs,
+        'large_folder': direct_subdirs > LARGE_FOLDER_THRESHOLD,
+    }
+
+
 def create_project(name: str, raw_path: str) -> dict:
     path = resolve_allowed_path(raw_path)
     if not path.is_dir():

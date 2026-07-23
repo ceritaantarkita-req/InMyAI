@@ -10,7 +10,9 @@ Core local workspace, project indexing, FTS5 retrieval, memory, decision ledger,
 - ~~Graphify importer~~ ✓ implemented (CLI: `scripts/import_graphify.py`)
 - ~~Git tools~~ ✓ implemented (`git_tools.py`: read-only status/log/diff/branch/blame)
 - language-server
-- terminal approval sandbox
+- ~~mind-map folder/file browser~~ ✓ implemented (`GET /api/browse` + `Workspace.tsx`: `ExplorerView`, radial mind-map, drill-down to file level, no allowed-roots gate on browsing names — see `docs/decisions/explorer-and-terminal.md`)
+- ~~real interactive terminal~~ ✓ implemented (`/ws/terminal` PTY relay + `Workspace.tsx`/`TerminalView.tsx`, xterm.js); intentionally **not sandboxed** — full shell access under your own account, see `docs/decisions/explorer-and-terminal.md`
+- terminal approval sandbox — a distinct, still-unbuilt future item: a *restricted*, approval-gated command runner, as opposed to the raw interactive terminal above
 - ~~model benchmark registry~~ ✓ implemented (`models/registry.json` + `model_registry.py`); shipped profiles are `verified: false` pending user benchmarks
 - model load/unload lifecycle hooks
 - semantic embedding plugin

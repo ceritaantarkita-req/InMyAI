@@ -1,6 +1,6 @@
 # InMyAI QA Report
 
-Date: 2026-07-23 (updated after the v1/v2 merge + Agents Workspace panel + config fix; original visual pass below is from 2026-07-21 and is called out explicitly where it has not been re-verified)
+Date: 2026-07-23 (updated after the Explorer + Terminal tabs; earlier updates from the v1/v2 merge + Agents Workspace panel + config fix are folded in below; original visual pass is from 2026-07-21 and is called out explicitly where it has not been re-verified)
 
 ## Automated result (this session)
 
@@ -8,21 +8,34 @@ Date: 2026-07-23 (updated after the v1/v2 merge + Agents Workspace panel + confi
 |---|---|
 | Strict TypeScript (`tsc --noEmit`) | PASS |
 | Frontend tests (`node --test`) | 14/14 PASS |
-| FastAPI tests (`pytest services/api/tests`) | 94/94 PASS |
+| FastAPI tests (`pytest services/api/tests`) | 107/107 PASS |
 | In-process API smoke check (`scripts/smoke_check.py`) | PASS — see `SMOKE_REPORT.json` |
 | Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
-| Next.js production build (`next build`) | NOT RUN — this sandbox has no network access to fetch the Next.js SWC binary; run `npm run build` (or `npm run qa`) on a normal machine to verify |
-| Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the new Agents tab |
+| Next.js production build (`next build`) | PASS — see note below |
+| Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal tabs |
 
-The 94 backend tests include everything from the original P0 build plus
+`next build` was run against a copy of `apps/web` outside this sandbox's
+FUSE-mounted project folder (an `rsync` into `/tmp`, `node_modules` fetched
+fresh there): compiled and prerendered cleanly, including the fix for the
+SSR crash `@xterm/xterm` caused (see
+`docs/decisions/explorer-and-terminal.md`, section 7). Running it directly
+on the mounted folder in this sandbox hits an unrelated `Bus error` — a
+sandbox mmap artifact, not a code issue — so this workaround is what
+actually verifies the build, not a substitute for it. Your own machine's
+normal filesystem doesn't have this constraint; `npm run build` there
+should just work.
+
+The 107 backend tests include everything from the original P0 build plus
 regression coverage added since: multi-agent task orchestration
 (`test_agent_runtime.py`), PPTX indexing (`test_office_indexing.py`),
 stale-write detection (`test_core.py`), the dependency-free `apps/local-ui`
-static mount (`test_local_ui.py`), and the `INMYAI_*` env-prefix binding fix
-(`test_config.py`). `test_git_tools.py` (9 tests, read-only git status/log/
-diff/branch/blame) is part of that 94 and passes cleanly on a normal
-filesystem; see the note in `docs/decisions/v1-v2-merge-and-agents-panel.md`
-if it fails specifically inside a FUSE-mounted sandbox directory — that is an
+static mount (`test_local_ui.py`), the `INMYAI_*` env-prefix binding fix
+(`test_config.py`), the mind-map browse endpoint (`test_browse.py`, 8
+tests), and the interactive terminal's `PtySession` (`test_terminal.py`, 5
+tests). `test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
+blame) is part of that 107 and passes cleanly on a normal filesystem; see
+the note in `docs/decisions/v1-v2-merge-and-agents-panel.md` if it fails
+specifically inside a FUSE-mounted sandbox directory — that is an
 environment artifact, not a code defect.
 
 ## What changed since the 2026-07-21 pass
@@ -31,22 +44,34 @@ environment artifact, not a code defect.
   task orchestration (`agent_runtime.py`), stale-write detection + atomic
   writes, PPTX indexing, and the dependency-free `apps/local-ui`.
 - Added an "Agents" tab to the Next.js Workspace (`AgentsView` in
-  `Workspace.tsx`) — the app now has seven primary surfaces instead of five.
+  `Workspace.tsx`).
 - Fixed the `INMYAI_*` environment-variable prefix so documented overrides
   (`INMYAI_PROVIDER`, `INMYAI_ALLOWED_ROOTS`, etc.) actually bind.
 - InMyAI v2 itself has been retired — this repository is now the single
   source of truth for the project.
+- Added an "Explorer" tab: a mind-map style folder/file browser
+  (`GET /api/browse`) that lets you look around anywhere on disk — names
+  only, no content — before deciding what to register as a project.
+- Added a "Terminal" tab: a real interactive shell (PowerShell on Windows,
+  your default shell on POSIX) over a WebSocket PTY relay
+  (`/ws/terminal`) — explicitly not sandboxed.
+- The app now has nine primary surfaces instead of five.
 
-Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`.
+Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`
+and `docs/decisions/explorer-and-terminal.md`.
 
 ## Smoke workflow
 
 See `SMOKE_REPORT.json`, regenerated by `scripts/smoke_check.py` against the
 bundled `examples/synthetic-project`: health, hardware, project registration,
 incremental indexing, FTS search, Safe Mock chat with citations,
-model-runtime status, and — new in this session — the full agent task
-pipeline (`agents` list, `POST /api/tasks`, `POST /api/tasks/{id}/run`)
-through to a `completed` checkpoint.
+model-runtime status, and the full agent task pipeline (`agents` list,
+`POST /api/tasks`, `POST /api/tasks/{id}/run`) through to a `completed`
+checkpoint. Explorer's `GET /api/browse` and the Terminal's `/ws/terminal`
+PTY relay are covered by their own dedicated test files
+(`test_browse.py`, `test_terminal.py`) rather than the smoke script, since
+one browses the live sandbox filesystem and the other spawns a real shell
+process — see `docs/decisions/explorer-and-terminal.md` for why.
 
 ## Visual verification (2026-07-21, not re-verified this session)
 
@@ -79,7 +104,7 @@ screenshot comparison above.
 2. **Palette:** true white surfaces, quiet gray background, compact dark typography, restrained blue selection state retained.
 3. **Chat anatomy:** assistant/user messages, context explanation, source chips, and bottom composer retained.
 4. **Safety visibility:** controlled file tools, model/runtime status, RAM profile, and one-engine policy are visible.
-5. **Responsive behavior:** desktop sidebars collapse into a mobile bottom navigation (now seven items, one per surface) without horizontal overflow — not re-verified visually this session, but the CSS grid was updated to `repeat(7,1fr)` to match.
+5. **Responsive behavior:** desktop sidebars collapse into a mobile bottom navigation (now nine items, one per surface) without horizontal overflow — not re-verified visually this session, but the CSS grid was updated to match.
 
 ## Above-the-fold copy diff
 
@@ -94,4 +119,4 @@ No unapproved marketing hero, decorative eyebrow, fake metric, or capability cla
 
 ## Conclusion
 
-Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, and — as of this session — multi-agent task orchestration with a Workspace UI panel, all pass their automated tests (94 backend + 14 frontend + a live in-process smoke check). The Next.js production build and a fresh visual/screenshot pass could not be re-run in this sandbox (no network, no Playwright) and should be run once on a normal machine before treating this as fully re-verified end to end. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.
+Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, and the interactive Terminal all pass their automated tests (107 backend + 14 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.

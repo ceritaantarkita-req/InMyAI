@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic'
 import {
   Bot, BrainCircuit, Check, ChevronLeft, Code2, Copy, Download, ExternalLink,
   FileCode2, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
-  Loader2, Map, MemoryStick, MessageSquareText, Network, PlayCircle, Plus,
+  Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PlayCircle, Plus,
   RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
   TerminalSquare, Users, Workflow, X
 } from './Icons'
@@ -37,9 +37,13 @@ const nav: { id: View; label: string; icon: typeof Bot }[] = [
   { id: 'studio', label: 'Studio', icon: Sparkles },
   { id: 'git', label: 'Git', icon: GitBranch },
   { id: 'agents', label: 'Agents', icon: Workflow },
-  { id: 'explorer', label: 'Explorer', icon: Map },
+  { id: 'explorer', label: 'Explorer', icon: MapIcon },
   { id: 'terminal', label: 'Terminal', icon: TerminalSquare }
 ]
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
 
 async function confirmWideFolder(path: string): Promise<'continue' | 'cancel' | 'normal'> {
   // Returns 'normal' when no gate is needed, 'continue'/'cancel' after the
@@ -218,7 +222,7 @@ export function Workspace() {
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Close notice"><X size={15}/></button></div>}
         <div className="content-area">
           {view === 'explorer' ? (
-            <ExplorerView onOpenProject={registerProjectFromExplorer}/>
+            <ExplorerView onOpenProject={registerProjectFromExplorer} activeProject={project}/>
           ) : view === 'terminal' ? (
             <TerminalView initialPath={project?.path}/>
           ) : !project ? (
@@ -382,10 +386,24 @@ function MemoryView({ project }: { project: Project }) {
 
 function GraphView({ project }: { project: Project }) {
   const [relations, setRelations] = useState<Relation[]>([]); const [node, setNode] = useState(''); const [result, setResult] = useState<{ selected?: string; neighbors?: { direction: string; node: string; relation: string; confidence: string }[] } | null>(null)
+  const [importBusy, setImportBusy] = useState(false); const [importNotice, setImportNotice] = useState('')
   useEffect(() => { void api<{ relations: Relation[] }>(`/api/projects/${project.id}/graph`).then((data) => setRelations(data.relations)) }, [project.id])
   async function query() { setResult(await api(`/api/projects/${project.id}/graph?node=${encodeURIComponent(node)}`)) }
+  async function importGraphify(file: File) {
+    setImportBusy(true); setImportNotice('')
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+      const res = await api<{ imported: number }>(`/api/projects/${project.id}/graph/import`, { method: 'POST', body: JSON.stringify(payload) })
+      setImportNotice(`Imported ${res.imported} edge(s).`)
+      const refreshed = await api<{ relations: Relation[] }>(`/api/projects/${project.id}/graph`)
+      setRelations(refreshed.relations)
+    } catch (err) {
+      setImportNotice(err instanceof Error ? err.message : 'Import failed.')
+    } finally { setImportBusy(false) }
+  }
   const nodes = useMemo(() => Array.from(new Set(relations.flatMap((r) => [r.source_node, r.target_node]))).slice(0, 24), [relations])
-  return <div className="graph-layout"><section className="graph-canvas"><div className="graph-search"><Search size={16}/><input value={node} onChange={(e) => setNode(e.target.value)} placeholder="Explain a file, symbol, or dependency"/><button className="primary small" onClick={() => void query()}>Trace</button></div><div className="node-cloud">{nodes.map((item, index) => <button key={item} onClick={() => { setNode(item); setTimeout(() => void query(), 0) }} style={{ '--i': index } as CSSProperties}>{item}</button>)}</div><div className="graph-caption"><Network size={17}/><p>The built-in graph uses deterministic imports and symbol extraction. Graphify graph.json can be integrated as an additional source.</p></div></section><aside className="graph-inspector"><h3>{result?.selected || 'Graph inspector'}</h3>{!result?.neighbors?.length ? <p className="muted">Select or trace a node to inspect its edges.</p> : result.neighbors.map((neighbor, index) => <article key={`${neighbor.node}-${index}`}><span>{neighbor.direction === 'out' ? '→' : '←'} {neighbor.relation}</span><strong>{neighbor.node}</strong><small>{neighbor.confidence}</small></article>)}</aside></div>
+  return <div className="graph-layout"><section className="graph-canvas"><div className="graph-search"><Search size={16}/><input value={node} onChange={(e) => setNode(e.target.value)} placeholder="Explain a file, symbol, or dependency"/><button className="primary small" onClick={() => void query()}>Trace</button><label className="secondary small">{importBusy ? <Loader2 className="spin" size={13}/> : <Download size={13}/>}Import graph.json<input type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importGraphify(f); e.target.value = '' }}/></label>{importNotice && <small className="muted">{importNotice}</small>}</div><div className="node-cloud">{nodes.map((item, index) => <button key={item} onClick={() => { setNode(item); setTimeout(() => void query(), 0) }} style={{ '--i': index } as CSSProperties}>{item}</button>)}</div><div className="graph-caption"><Network size={17}/><p>The built-in graph uses deterministic imports and symbol extraction. Import a Graphify graph.json above to add inferred edges.</p></div></section><aside className="graph-inspector"><h3>{result?.selected || 'Graph inspector'}</h3>{!result?.neighbors?.length ? <p className="muted">Select or trace a node to inspect its edges.</p> : result.neighbors.map((neighbor, index) => <article key={`${neighbor.node}-${index}`}><span>{neighbor.direction === 'out' ? '→' : '←'} {neighbor.relation}</span><strong>{neighbor.node}</strong><small>{neighbor.confidence}</small></article>)}</aside></div>
 }
 
 function StudioView({ project }: { project: Project }) {
@@ -649,7 +667,7 @@ function AgentsView({ project }: { project: Project }) {
 const EXPLORER_ROOT_KEY = 'inmyai:explorer:lastRoot'
 type ExplorerSelection = { name: string; path: string; is_dir: boolean; is_project: boolean }
 
-function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: string) => Promise<void> }) {
+function ExplorerView({ onOpenProject, activeProject }: { onOpenProject: (path: string, name: string) => Promise<void>; activeProject: Project | null }) {
   const [rootInput, setRootInput] = useState('')
   const [currentPath, setCurrentPath] = useState<string | null>(null)
   const [parentPath, setParentPath] = useState<string | null>(null)
@@ -659,6 +677,34 @@ function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: s
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [opening, setOpening] = useState(false)
+
+  const [relations, setRelations] = useState<Relation[]>([])
+  const [showRelations, setShowRelations] = useState(false)
+  const RELATION_EDGE_CAP = 60
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('inmyai:explorer:showRelations') : null
+    setShowRelations(stored === '1')
+  }, [])
+  function toggleRelations() {
+    setShowRelations((current) => {
+      const next = !current
+      if (typeof window !== 'undefined') window.localStorage.setItem('inmyai:explorer:showRelations', next ? '1' : '0')
+      return next
+    })
+  }
+
+  const browsingActiveProject = !!activeProject && activeProject.status === 'ready' && !!currentPath && !!activeProject.path
+    && normalizePath(currentPath) === normalizePath(activeProject.path)
+
+  useEffect(() => {
+    if (!browsingActiveProject || !activeProject) { setRelations([]); return }
+    let cancelled = false
+    api<{ relations: Relation[] }>(`/api/projects/${activeProject.id}/graph`).then((data) => {
+      if (!cancelled) setRelations(data.relations)
+    }).catch(() => { if (!cancelled) setRelations([]) })
+    return () => { cancelled = true }
+  }, [browsingActiveProject, activeProject?.id])
 
   const load = useCallback(async (path: string, nextHistory: string[]) => {
     setLoading(true); setError('')
@@ -739,22 +785,49 @@ function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: s
     })
   }, [entries])
 
+  const overlayEdges = useMemo(() => {
+    if (!showRelations || !browsingActiveProject) return []
+    const nameToPos = new Map<string, { x: number; y: number }>()
+    for (const { entry, x, y } of positioned) nameToPos.set(entry.name, { x, y })
+    nameToPos.set(currentName || '', { x: 300, y: 235 })
+    const edges: { sx: number; sy: number; tx: number; ty: number; relation: string; source: string; target: string }[] = []
+    for (const rel of relations) {
+      if (edges.length >= RELATION_EDGE_CAP) break
+      // Relations carry relative paths (e.g. 'src/auth.ts') but radial nodes
+      // show bare names, so match by basename first, then the full path. This
+      // is intentionally approximate — the overlay is a visual hint, not an
+      // authoritative view; two files sharing a basename can collide. The
+      // Graph tab remains the authoritative tracer.
+      const srcName = rel.source_node.split('/').pop() || ''
+      const tgtName = rel.target_node.split('/').pop() || ''
+      const s = nameToPos.get(srcName) || nameToPos.get(rel.source_node)
+      const t = nameToPos.get(tgtName) || nameToPos.get(rel.target_node)
+      if (s && t) edges.push({ sx: s.x, sy: s.y, tx: t.x, ty: t.y, relation: rel.relation, source: rel.source_node, target: rel.target_node })
+    }
+    return edges
+  }, [showRelations, browsingActiveProject, relations, positioned, currentName])
+
   return (
     <div className="explorer-layout">
       <div className="explorer-toolbar">
         <button className="icon-button" title="Back" onClick={goBack} disabled={!history.length && !parentPath}><ChevronLeft size={17}/></button>
         <form onSubmit={submitRoot}>
           <input value={rootInput} onChange={(event) => setRootInput(event.target.value)} placeholder="Absolute folder path to start exploring, e.g. C:\Users\you\projects"/>
-          <button className="primary small" disabled={!rootInput.trim() || loading}>{loading ? <Loader2 className="spin" size={14}/> : <Map size={14}/>}Explore</button>
+          <button className="primary small" disabled={!rootInput.trim() || loading}>{loading ? <Loader2 className="spin" size={14}/> : <MapIcon size={14}/>}Explore</button>
         </form>
         {isTauri() && <button className="secondary small" type="button" onClick={() => void browseNative()}><FolderOpen size={13}/>Browse…</button>}
+        {browsingActiveProject && (
+          <button className={`secondary small${showRelations ? ' active' : ''}`} type="button" onClick={toggleRelations} title="Overlay code relations (imports/defines/calls)">
+            <Network size={13}/>{showRelations ? 'Relations on' : 'Relations'}
+          </button>
+        )}
       </div>
 
       {error && <div className="notice"><span>{error}</span><button onClick={() => setError('')} aria-label="Close notice"><X size={15}/></button></div>}
 
       {!currentPath ? (
         <div className="explorer-empty">
-          <Map size={34}/>
+          <MapIcon size={34}/>
           <h2>Explore your disk</h2>
           <p>Paste an absolute folder path above to start. Browsing folder and file names never requires an allowed root - only opening a folder as a chat project does.</p>
         </div>
@@ -763,6 +836,9 @@ function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: s
           {loading && <div className="explorer-loading"><Loader2 className="spin" size={22}/></div>}
           {!loading && !entries.length && <p className="muted explorer-empty-folder">This folder is empty.</p>}
           <svg className="explorer-canvas" viewBox="0 0 600 460" role="img" aria-label={`Contents of ${currentPath}`}>
+            {overlayEdges.map((edge, i) => (
+              <line key={`rel-${i}`} x1={edge.sx} y1={edge.sy} x2={edge.tx} y2={edge.ty} className={`relation-edge rel-${edge.relation}`} />
+            ))}
             {positioned.map(({ entry, x, y }) => (
               <line key={`edge-${entry.path}`} x1={300} y1={235} x2={x} y2={y} className="explorer-edge"/>
             ))}
@@ -782,6 +858,13 @@ function ExplorerView({ onOpenProject }: { onOpenProject: (path: string, name: s
             ))}
           </svg>
         </div>
+      )}
+
+      {activeProject && currentPath && normalizePath(currentPath) === normalizePath(activeProject.path) && activeProject.status !== 'ready' && (
+        <p className="muted explorer-hint">Index this project to see code relations here.</p>
+      )}
+      {browsingActiveProject && showRelations && relations.length > RELATION_EDGE_CAP && (
+        <p className="muted explorer-hint">{relations.length} relations — showing first {RELATION_EDGE_CAP}. Use the Graph tab to trace the rest.</p>
       )}
 
       {selected && (

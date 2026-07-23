@@ -144,3 +144,38 @@ def test_import_graphify_imported_relations_are_graph_queryable() -> None:
     assert result['selected'] == 'svc.ts'
     out_targets = {n['node'] for n in result['neighbors'] if n['direction'] == 'out'}
     assert 'repo.ts' in out_targets
+
+
+# ---------- HTTP endpoint: POST /api/projects/{id}/graph/import ----------
+
+def test_graph_import_endpoint_accepts_graphify_json() -> None:
+    """Phase 2 Task 3: the Graphify importer is now reachable over HTTP so the
+    Graph tab UI can offer it as a real affordance, not just a footer caption."""
+    from services.api.app.config import settings
+    from fastapi.testclient import TestClient
+    from services.api.app.main import app
+    client = TestClient(app)
+    projects = client.get('/api/projects').json()
+    if not projects:
+        root = settings.workspace_root / 'graphify_demo'
+        root.mkdir(parents=True, exist_ok=True)
+        proj = client.post('/api/projects', json={'name': 'Graphify', 'path': str(root)}).json()
+        project_id = proj['id']
+    else:
+        project_id = projects[0]['id']
+    payload = {
+        'nodes': [{'id': 'a'}, {'id': 'b'}],
+        'edges': [{'source': 'a', 'target': 'b', 'relation': 'depends_on'}],
+    }
+    response = client.post(f'/api/projects/{project_id}/graph/import', json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['imported'] >= 1
+
+
+def test_graph_import_endpoint_404_for_unknown_project() -> None:
+    from fastapi.testclient import TestClient
+    from services.api.app.main import app
+    client = TestClient(app)
+    response = client.post('/api/projects/999999/graph/import', json={'edges': []})
+    assert response.status_code == 404

@@ -306,6 +306,22 @@ def graph(project_id: int, node: str = '') -> dict:
     return {'relations': services.list_relations(project_id)}
 
 
+@app.post('/api/projects/{project_id}/graph/import')
+def graph_import(project_id: int, payload: dict) -> dict:
+    """Import a Graphify graph.json into the relations table.
+
+    Edges supplement (do not replace) deterministic EXTRACTED relations; each
+    imported edge is tagged confidence='INFERRED'. Accepts the Graphify payload
+    shape directly as JSON.
+    """
+    try:
+        return services.import_graphify(project_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _git_project_path(project_id: int) -> Path:
     """Resolve a registered project's path for git operations. Raises KeyError/HTTPException."""
     project = services.get_project(project_id)

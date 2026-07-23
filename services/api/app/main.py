@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from .config import settings
 from .database import connect, migrate, transaction, utc_now
 from .indexer import index_project
-from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_status
+from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_install_state, get_ollama_status
 from .image_provider import generate_with_comfyui
 from .router_engine import route, to_dict
 from .schemas import (
@@ -50,6 +50,55 @@ def hardware() -> dict:
 @app.get('/api/models/status')
 async def models_status() -> dict:
     return {'ollama': await get_ollama_status(), 'configured_provider': settings.provider}
+
+
+@app.get('/api/models/onboarding')
+async def models_onboarding() -> dict:
+    """Single state object the onboarding wizard renders from.
+
+    `phase` tells the UI which step to show:
+      download_ollama | start_ollama | pull_model | ready
+    `recommended` lists registry profiles matching the device's hardware class,
+    each with a ready-to-copy `pull_command`.
+    """
+    from .model_registry import recommend_for_hardware
+
+    state = await get_ollama_install_state()
+    snapshot = services.hardware_snapshot()
+    hardware_profile = snapshot['profile']
+
+    installed = state['installed']
+    running = state['running']
+    models = state.get('models', [])
+    if not installed:
+        phase = 'download_ollama'
+    elif not running:
+        phase = 'start_ollama'
+    elif not models:
+        phase = 'pull_model'
+    else:
+        phase = 'ready'
+
+    recommended = [
+        {
+            'id': p.id,
+            'model': p.model,
+            'task_types': p.task_types,
+            'peak_ram_mb': p.peak_ram_mb,
+            'pull_command': f'ollama pull {p.model}',
+            'notes': p.notes,
+        }
+        for p in recommend_for_hardware(hardware_profile)
+    ]
+    return {
+        'phase': phase,
+        'installed': installed,
+        'version': state.get('version'),
+        'running': running,
+        'models': [{'name': m.get('name', '')} for m in models],
+        'hardware_profile': hardware_profile,
+        'recommended': recommended,
+    }
 
 
 @app.get('/api/projects')

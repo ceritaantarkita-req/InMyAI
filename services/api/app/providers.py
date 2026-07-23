@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from dataclasses import dataclass
 from typing import Any
 
@@ -96,3 +98,45 @@ async def get_ollama_status() -> dict:
         return {'available': True, 'models': models, 'base_url': settings.ollama_base_url}
     except Exception as exc:
         return {'available': False, 'models': [], 'base_url': settings.ollama_base_url, 'error': str(exc)}
+
+
+def _probe_ollama_binary() -> tuple[bool, str | None]:
+    """Return (installed, version) by probing the PATH for an ollama binary.
+
+    Mirrors the shutil.which('tesseract') pattern. On Windows, Ollama is often
+    installed under AppData; which() covers that when the installer added it to
+    PATH (the default). A hang is bounded by a short timeout.
+    """
+    binary = shutil.which('ollama')
+    if binary is None:
+        return False, None
+    try:
+        result = subprocess.run(
+            [binary, '--version'], capture_output=True, text=True, timeout=5
+        )
+        version = result.stdout.strip() or result.stderr.strip() or None
+        return True, version
+    except (subprocess.TimeoutExpired, OSError):
+        # Binary exists but wouldn't answer — treat as installed, version unknown.
+        return True, None
+
+
+async def get_ollama_install_state() -> dict:
+    """Combine a binary probe with the running/models status.
+
+    Used by the onboarding endpoint to classify which step a user is on:
+      installed=False           -> download Ollama
+      installed=True, not running -> start Ollama
+      running=True, no models   -> pull a model
+      running=True, has models  -> ready
+    """
+    installed, version = _probe_ollama_binary()
+    status = await get_ollama_status()
+    return {
+        'installed': installed,
+        'version': version,
+        'running': status['available'],
+        'models': status.get('models', []),
+        'base_url': settings.ollama_base_url,
+        'error': status.get('error'),
+    }

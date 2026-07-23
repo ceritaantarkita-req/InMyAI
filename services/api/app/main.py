@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import connect, migrate, transaction, utc_now
@@ -17,10 +18,11 @@ from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
 from .security import safe_join
 from .schemas import (
-    ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
-    ProjectCreate, SearchRequest, WriteProposalCreate
+    AgentCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
+    ProjectCreate, SearchRequest, TaskCreate, WriteProposalCreate
 )
 from . import services
+from . import agent_runtime
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -37,6 +39,14 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*']
 )
+
+# Dependency-free static UI (plain HTML/JS/CSS, no Node/npm required) served
+# straight from the API process. Optional: only mounted if the directory
+# exists, so the API still runs standalone in environments that only ship the
+# apps/web (Next.js) frontend separately.
+_local_ui = (Path(__file__).resolve().parents[3] / 'apps' / 'local-ui').resolve()
+if _local_ui.exists():
+    app.mount('/app', StaticFiles(directory=str(_local_ui), html=True), name='local-ui')
 
 
 @app.get('/api/health')
@@ -466,3 +476,56 @@ def generated_file(project_id: int, path: str = Query(...)):
         return FileResponse(file_path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/agents')
+def agents(project_id: int) -> list[dict]:
+    return agent_runtime.list_agents(project_id)
+
+
+@app.post('/api/agents')
+def create_agent(payload: AgentCreate) -> dict:
+    try:
+        return agent_runtime.create_agent(payload.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/tasks')
+def tasks(project_id: int) -> list[dict]:
+    return agent_runtime.list_tasks(project_id)
+
+
+@app.post('/api/tasks')
+def create_task(payload: TaskCreate) -> dict:
+    try:
+        return agent_runtime.create_task(payload.project_id, payload.title, payload.instruction, payload.provider)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/tasks/{task_id}')
+def task_detail(task_id: int) -> dict:
+    try:
+        return agent_runtime.task_detail(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/api/tasks/{task_id}/run')
+async def run_task(task_id: int) -> dict:
+    try:
+        return await agent_runtime.run_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post('/api/tasks/{task_id}/cancel')
+def cancel_task(task_id: int) -> dict:
+    try:
+        return agent_runtime.cancel_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+

@@ -18,12 +18,14 @@ client = TestClient(app)
 # Unique markers so a search query hits exactly one document.
 DOCX_MARKER = 'NEBULA_QUARTERLY_REPORT_MARKER'
 XLSX_MARKER = 'ZIRCON_REVENUE_BREAKDOWN_MARKER'
+PPTX_MARKER = 'HALCYON_ROADMAP_SLIDE_MARKER'
 
 
 def _seed_office_fixtures() -> None:
-    """Write a tiny .docx and .xlsx into the shared demo project dir."""
+    """Write a tiny .docx, .xlsx and .pptx into the shared demo project dir."""
     from docx import Document
     import openpyxl
+    from pptx import Presentation
 
     demo = settings.workspace_root / 'demo'
     demo.mkdir(parents=True, exist_ok=True)
@@ -40,6 +42,11 @@ def _seed_office_fixtures() -> None:
     ws.append(['North', XLSX_MARKER])
     ws.append(['South', '200'])
     wb.save(demo / 'finance.xlsx')
+
+    deck = Presentation()
+    slide = deck.slides.add_slide(deck.slide_layouts[5])
+    slide.shapes.title.text = f'Roadmap: {PPTX_MARKER}'
+    deck.save(demo / 'roadmap.pptx')
 
 
 def _create_demo_project() -> dict:
@@ -75,6 +82,35 @@ def test_docx_and_xlsx_are_indexed_and_searchable() -> None:
         'project_id': project['id'], 'query': XLSX_MARKER
     }).json()
     assert any(h['relative_path'] == 'finance.xlsx' for h in xlsx_hit['results']), xlsx_hit
+
+
+def test_pptx_is_indexed_searchable_and_parser_tracked() -> None:
+    _seed_office_fixtures()
+    project = _create_demo_project()
+    result = client.post(f"/api/projects/{project['id']}/index")
+    assert result.status_code == 200, result.text
+
+    indexed_files = client.get(f"/api/projects/{project['id']}/files").json()
+    rel_paths = {f['relative_path'] for f in indexed_files}
+    assert 'roadmap.pptx' in rel_paths, f'pptx not indexed; got {sorted(rel_paths)}'
+
+    # parser/parse_status are internal-only columns (not in the /files API
+    # response, same as v2) so a future audit can tell which extractor
+    # handled a file without re-reading it. Verify directly against the DB.
+    from services.api.app.database import connect
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT parser, parse_status FROM files WHERE project_id=? AND relative_path='roadmap.pptx'",
+            (project['id'],)
+        ).fetchone()
+    assert row is not None
+    assert row['parser'] == 'pptx'
+    assert row['parse_status'] == 'indexed'
+
+    pptx_hit = client.post('/api/search', json={
+        'project_id': project['id'], 'query': PPTX_MARKER
+    }).json()
+    assert any(h['relative_path'] == 'roadmap.pptx' for h in pptx_hit['results']), pptx_hit
 
 
 def test_corrupt_office_file_does_not_crash_indexing() -> None:

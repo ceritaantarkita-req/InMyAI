@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import os
 import random
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -321,9 +323,10 @@ def create_write_proposal(project_id: int, relative_path: str, proposed_content:
     now = utc_now()
     with transaction() as conn:
         cur = conn.execute(
-            '''INSERT INTO write_proposals(project_id,relative_path,original_content,proposed_content,diff,status,created_at)
-               VALUES(?,?,?,?,?,?,?)''',
-            (project_id, relative_path, original, proposed_content, diff, 'pending', now)
+            '''INSERT INTO write_proposals(project_id,relative_path,original_content,proposed_content,diff,status,created_at,original_sha256)
+               VALUES(?,?,?,?,?,?,?,?)''',
+            (project_id, relative_path, original, proposed_content, diff, 'pending', now,
+             hashlib.sha256(original.encode('utf-8')).hexdigest())
         )
         row = conn.execute('SELECT * FROM write_proposals WHERE id=?', (cur.lastrowid,)).fetchone()
     return dict(row)
@@ -348,12 +351,25 @@ def apply_write_proposal(proposal_id: int) -> dict:
         root = Path(project['path']).resolve()
         path = safe_join(root, proposal['relative_path'], must_exist=False)
         path.parent.mkdir(parents=True, exist_ok=True)
+        current = path.read_text(encoding='utf-8', errors='replace') if path.exists() else ''
+        current_hash = hashlib.sha256(current.encode('utf-8')).hexdigest()
+        if proposal['original_sha256'] and current_hash != proposal['original_sha256']:
+            raise ValueError('Stale write detected: the file changed after this proposal was created.')
         backup_path = None
         if path.exists():
             stamp = datetime.now().strftime('%d%m%y-%H%M%S')
             backup_path = path.with_name(f'{path.name}.backup.{stamp}')
             shutil.copy2(path, backup_path)
-        path.write_text(proposal['proposed_content'], encoding='utf-8')
+        fd, temp_name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=str(path.parent))
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8', newline='') as handle:
+                handle.write(proposal['proposed_content'])
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
         now = utc_now()
         conn.execute(
             'UPDATE write_proposals SET status=?,backup_path=?,applied_at=? WHERE id=?',

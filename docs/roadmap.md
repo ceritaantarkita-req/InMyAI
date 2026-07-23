@@ -8,15 +8,20 @@ Core local workspace, project indexing, FTS5 retrieval, memory, decision ledger,
 
 - Tauri desktop shell and native folder picker
 - ~~Graphify importer~~ ✓ implemented (CLI: `scripts/import_graphify.py`)
-- language-server and Git tools
+- ~~Git tools~~ ✓ implemented (`git_tools.py`: read-only status/log/diff/branch/blame)
+- language-server
 - terminal approval sandbox
 - ~~model benchmark registry~~ ✓ implemented (`models/registry.json` + `model_registry.py`); shipped profiles are `verified: false` pending user benchmarks
 - model load/unload lifecycle hooks
 - semantic embedding plugin
-- DOCX/XLSX parsers
+- ~~DOCX/XLSX/PPTX parsers~~ ✓ implemented (`indexer.py`, ported from v2 during the v1/v2 merge)
+- ~~multi-agent task orchestration~~ ✓ implemented (`agent_runtime.py`: Coordinator/Researcher/Worker/Verifier, ported from v2 during the v1/v2 merge); not yet surfaced in the Workspace UI, see `docs/agent-runtime.md`
+- ~~dependency-free fallback UI~~ ✓ implemented (`apps/local-ui`, served at `/app/`, ported from v2)
+- ~~stale-write detection on file proposals~~ ✓ implemented (`services.py`: sha256 check + atomic tempfile write, ported from v2)
 - Indonesian localization
 - ComfyUI executor
-- AST-based graph extraction (tree-sitter for Python/JS/TS, replacing regex) ✓ implemented (`ast_extractor.py`)
+- AST-based graph extraction (tree-sitter for Python/JS/TS, replacing regex) ✓ implemented (`ast_extractor.py`); expanded to Go/Rust/PHP/Java/C/C++
+- Agents tab in the Next.js Workspace UI (agent_runtime.py has no Workspace.tsx panel yet, only local-ui)
 
 ## P2
 

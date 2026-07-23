@@ -142,8 +142,52 @@ def migrate() -> None:
                 detail TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS agents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                slug TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'auto',
+                model TEXT NOT NULL DEFAULT 'auto',
+                tools_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'idle',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(project_id, slug)
+            );
+            CREATE TABLE IF NOT EXISTS agent_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+                state TEXT NOT NULL,
+                message TEXT NOT NULL,
+                data_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
             '''
         )
+        # Additive, idempotent column migrations for databases created before
+        # these columns existed. SQLite has no "ADD COLUMN IF NOT EXISTS", so
+        # each statement is attempted and a "duplicate column" failure (already
+        # migrated) is swallowed; any other OperationalError still surfaces.
+        for statement in (
+            "ALTER TABLE tasks ADD COLUMN instruction TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tasks ADD COLUMN provider TEXT NOT NULL DEFAULT 'auto'",
+            "ALTER TABLE tasks ADD COLUMN plan_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE tasks ADD COLUMN result_text TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tasks ADD COLUMN verification_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE tasks ADD COLUMN artifact_path TEXT",
+            "ALTER TABLE write_proposals ADD COLUMN original_sha256 TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE files ADD COLUMN parser TEXT NOT NULL DEFAULT 'text'",
+            "ALTER TABLE files ADD COLUMN parse_status TEXT NOT NULL DEFAULT 'indexed'"
+        ):
+            try:
+                conn.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():
+                    raise
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

@@ -12,18 +12,23 @@ InMyAI is a lightweight, local-first AI workspace designed for everyday laptops 
 
 ## Working P0 capabilities
 
-- Next.js workspace UI with five primary surfaces: Chat, Files, Memory, Graph, Studio
+- Next.js workspace UI with six primary surfaces: Chat, Files, Memory, Graph, Studio, Git
+- A second, dependency-free UI (`apps/local-ui`, no Node/npm needed) served by the API itself at `/app/`
 - FastAPI local backend and SQLite/FTS5 persistence
 - Register and incrementally index explicitly allowed local folders
+- Text/code, PDF, DOCX, XLSX, and PPTX parsing
 - Search indexed code and documents with SQLite FTS5/BM25
-- Deterministic code relation graph from imports and symbols
+- AST-based code relation graph (tree-sitter: Python, JS/TS, Go, Rust, PHP, Java, C, C++)
+- Read-only Git surface: status, log, diff, branches, blame
 - Automatic task classification and model/tool routing
 - Automatic selection among installed Ollama models by task and model size
 - Safe mock provider, allowing the whole core to run without downloading model weights
 - Ollama local chat provider
+- Multi-agent task orchestration (Coordinator/Researcher/Worker/Verifier) with durable, replayable checkpoints — see `docs/agent-runtime.md`
+- First-run onboarding wizard that detects Ollama's install/running/model state and guides setup
 - Persistent project memory and structured decision ledger
 - Active/superseded decision handling
-- File editing through proposal → diff → approval → backup → write
+- File editing through proposal → diff → approval → backup → write, with stale-write detection and atomic writes
 - PDF text extraction and real local Tesseract OCR
 - Low-memory image workflow simulator for testing
 - Optional real local image generation through Diffusers or ComfyUI integration

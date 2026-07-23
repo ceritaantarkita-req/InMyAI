@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "cycles": [
+    {
+      "cycle": 1,
+      "index": {
+        "indexed": 2,
+        "unchanged": 0,
+        "removed": 0,
+        "errors": []
+      },
+      "task_status": "completed",
+      "events": [
+        "queued",
+        "planning",
+        "retrieving",
+        "running_tool",
+        "verifying",
+        "completed"
+      ],
+      "proposal_status": "applied",
+      "backup_exists": true
+    },
+    {
+      "cycle": 2,
+      "index": {
+        "indexed": 2,
+        "unchanged": 0,
+        "removed": 0,
+        "errors": []
+      },
+      "task_status": "completed",
+      "events": [
+        "queued",
+        "planning",
+        "retrieving",
+        "running_tool",
+        "verifying",
+        "completed"
+      ],
+      "proposal_status": "applied",
+      "backup_exists": true
+    },
+    {
+      "cycle": 3,
+      "index": {
+        "indexed": 2,
+        "unchanged": 0,
+        "removed": 0,
+        "errors": []
+      },
+      "task_status": "completed",
+      "events": [
+        "queued",
+        "planning",
+        "retrieving",
+        "running_tool",
+        "verifying",
+        "completed"
+      ],
+      "proposal_status": "applied",
+      "backup_exists": true
+    }
+  ]
+}

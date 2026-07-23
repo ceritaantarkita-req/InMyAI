@@ -81,6 +81,23 @@ def test_write_proposal_backup_and_apply() -> None:
     assert 'false' in (settings.workspace_root / 'demo' / 'auth.ts').read_text()
 
 
+def test_stale_write_is_blocked() -> None:
+    # A proposal captures the file's hash at creation time. If the file is
+    # edited by someone/something else before the proposal is applied, apply
+    # must refuse rather than silently clobber the newer content.
+    project = create_demo_project()
+    target = settings.workspace_root / 'demo' / 'stale.txt'
+    target.write_text('one', encoding='utf-8')
+    proposal = client.post('/api/proposals', json={
+        'project_id': project['id'], 'relative_path': 'stale.txt', 'proposed_content': 'two'
+    }).json()
+    target.write_text('changed after proposal was created', encoding='utf-8')
+    applied = client.post(f"/api/proposals/{proposal['id']}/apply")
+    assert applied.status_code == 400
+    assert 'Stale write detected' in applied.text
+    assert target.read_text(encoding='utf-8') == 'changed after proposal was created'
+
+
 def test_ocr_and_image_simulator() -> None:
     project = create_demo_project()
     ocr = client.post('/api/ocr', json={

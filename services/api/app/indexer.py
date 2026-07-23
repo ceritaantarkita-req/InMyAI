@@ -15,8 +15,8 @@ TEXT_EXTENSIONS = {
     '.md', '.txt', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.ini', '.env.example',
     '.py', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.sql', '.sh', '.ps1',
     '.go', '.rs', '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.kt',
-    '.docx', '.xlsx',
 }
+DOCUMENT_EXTENSIONS = {'.pdf', '.docx', '.xlsx', '.pptx'}
 SKIP_DIRS = {
     '.git', '.next', 'node_modules', 'dist', 'build', 'coverage', '.venv', 'venv',
     '__pycache__', '.cache', 'models', 'downloads', 'artifacts', 'generated'
@@ -27,26 +27,26 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _read_text(path: Path) -> str:
+def _read_text(path: Path) -> tuple[str, str]:
     suffix = path.suffix.lower()
     if suffix == '.pdf':
         reader = PdfReader(str(path))
-        return '\n\n'.join(page.extract_text() or '' for page in reader.pages)
-    if suffix in {'.docx', '.xlsx'}:
-        return _read_office(path, suffix)
+        return '\n\n'.join(page.extract_text() or '' for page in reader.pages), 'pdf-text'
+    if suffix in {'.docx', '.xlsx', '.pptx'}:
+        return _read_office(path, suffix), suffix.lstrip('.')
     data = path.read_bytes()
     if b'\x00' in data[:4096]:
-        return ''
+        return '', 'binary'
     for encoding in ('utf-8', 'utf-8-sig', 'latin-1'):
         try:
-            return data.decode(encoding)
+            return data.decode(encoding), 'text'
         except UnicodeDecodeError:
             continue
-    return ''
+    return '', 'unknown'
 
 
 def _read_office(path: Path, suffix: str) -> str:
-    """Extract plain text from .docx / .xlsx (both are ZIP-based OOXML).
+    """Extract plain text from .docx / .xlsx / .pptx (all ZIP-based OOXML).
 
     Raises on a corrupt/non-OOXML file so the indexer records it in the per-file
     errors list instead of silently producing empty content.
@@ -61,6 +61,16 @@ def _read_office(path: Path, suffix: str) -> str:
                 if cells:
                     parts.append('\t'.join(cells))
         return '\n'.join(parts)
+    if suffix == '.pptx':
+        from pptx import Presentation
+        deck = Presentation(str(path))
+        lines: list[str] = []
+        for index, slide in enumerate(deck.slides, 1):
+            lines.append(f'# Slide {index}')
+            for shape in slide.shapes:
+                if hasattr(shape, 'text') and shape.text.strip():
+                    lines.append(shape.text.strip())
+        return '\n'.join(lines)
     # suffix == '.xlsx'
     import openpyxl
     wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
@@ -84,7 +94,7 @@ def iter_indexable_files(root: Path) -> Iterable[Path]:
         if any(part in SKIP_DIRS for part in path.parts):
             continue
         suffix = path.suffix.lower()
-        if suffix not in TEXT_EXTENSIONS and suffix != '.pdf':
+        if suffix not in TEXT_EXTENSIONS and suffix not in DOCUMENT_EXTENSIONS:
             continue
         if path.stat().st_size > settings.max_file_mb * 1024 * 1024:
             continue
@@ -133,24 +143,24 @@ def index_project(project_id: int, root: Path) -> dict:
                 if existing and existing['sha256'] == digest:
                     unchanged += 1
                     continue
-                content = _read_text(path)
+                content, parser = _read_text(path)
                 if not content.strip():
                     continue
                 if existing:
                     file_id = existing['id']
                     conn.execute(
                         '''UPDATE files SET absolute_path=?, extension=?, size_bytes=?, modified_ns=?,
-                           sha256=?, content=?, indexed_at=? WHERE id=?''',
+                           sha256=?, content=?, indexed_at=?, parser=?, parse_status=? WHERE id=?''',
                         (str(path), path.suffix.lower(), stat.st_size, stat.st_mtime_ns,
-                         digest, content, now, file_id)
+                         digest, content, now, parser, 'indexed', file_id)
                     )
                     conn.execute('DELETE FROM files_fts WHERE file_id=?', (file_id,))
                 else:
                     cur = conn.execute(
                         '''INSERT INTO files(project_id, relative_path, absolute_path, extension, size_bytes,
-                           modified_ns, sha256, content, indexed_at) VALUES(?,?,?,?,?,?,?,?,?)''',
+                           modified_ns, sha256, content, indexed_at, parser, parse_status) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
                         (project_id, relative, str(path), path.suffix.lower(), stat.st_size,
-                         stat.st_mtime_ns, digest, content, now)
+                         stat.st_mtime_ns, digest, content, now, parser, 'indexed')
                     )
                     file_id = cur.lastrowid
                 conn.execute(

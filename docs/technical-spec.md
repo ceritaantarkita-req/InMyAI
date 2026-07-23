@@ -40,13 +40,16 @@ Primary endpoints:
 - proposal/apply/reject endpoints
 - `POST /api/ocr`
 - `POST /api/images/generate`
+- `GET /api/projects/{id}/git/{status,log,branches,diff,blame}` (read-only)
 
 ## Supported indexing formats
 
 - code/text: MD, TXT, JSON, YAML, TOML, INI, Python, JS/TS, CSS, HTML, SQL, shell, PowerShell, Go, Rust, Java, C/C++, C#, PHP, Ruby, Swift, Kotlin
 - PDFs with extractable text
+- Office: DOCX (python-docx), XLSX (openpyxl) — extracted into the same FTS5 index
 
-Office files are planned as an optional plugin rather than forcing large dependencies into P0.
+The direct-read size limit defaults to 8 MB (INMYAI_MAX_FILE_MB), raised from
+2 MB so typical office documents are not silently excluded.
 
 ## Search
 

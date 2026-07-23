@@ -11,8 +11,12 @@ The interface follows the accepted usage concept: a quiet desktop productivity e
 3. Memory
 4. Graph
 5. Studio
+6. Git (read-only repository inspection: status/log/diff/branches/blame)
 
-Settings remains a utility modal, not a sixth primary work surface.
+Settings remains a utility modal, not a primary work surface. Git was added as
+a sixth surface rather than folded into Files because repository state is a
+distinct dev-workflow concern and deserves equal discoverability. Git tools are
+strictly read-only — no commits, pushes, or branch mutations go through InMyAI.
 
 ## Tokens
 

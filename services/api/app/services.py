@@ -46,12 +46,33 @@ def sync_allowed_roots() -> None:
     settings.allowed_roots = os.pathsep.join(p for p in [_ENV_ALLOWED_ROOTS, *dynamic_paths] if p)
 
 
+def _is_strictly_within(inner: Path, outer: Path) -> bool:
+    """True if `inner` is `outer` itself or deeper - i.e. `outer` already
+    covers `inner`, making a separate allow-list entry for `inner`
+    redundant. Never true for two equal paths (that's a duplicate, not
+    coverage, and both should stay visible so either can be removed)."""
+    if inner == outer:
+        return False
+    try:
+        inner.relative_to(outer)
+        return True
+    except ValueError:
+        return False
+
+
 def list_allowed_roots() -> list[dict]:
     """Every folder InMyAI will currently accept for `POST /api/projects`,
     from all three sources: the always-allowed workspace root, whatever
     `INMYAI_ALLOWED_ROOTS` set in `.env` (read-only from the UI - it only
     changes by editing `.env` and restarting), and whatever has been added
-    at runtime through this settings UI (deletable)."""
+    at runtime through this settings UI (deletable).
+
+    Entries already covered by a *broader* root elsewhere in the list are
+    hidden - e.g. if both `.../demo` and `.../demo/InMyAI_FullStack/workspace`
+    are allowed, only `.../demo` is shown, since it already grants access to
+    everything beneath it. Nothing is deleted from the database by this -
+    the narrower entry simply reappears if the broader one is later
+    removed."""
     workspace = [{'id': None, 'source': 'workspace', 'path': str(settings.workspace_root.resolve()), 'created_at': None}]
     env_roots = [
         {'id': None, 'source': 'env', 'path': item.strip(), 'created_at': None}
@@ -60,7 +81,12 @@ def list_allowed_roots() -> list[dict]:
     with connect() as conn:
         rows = conn.execute('SELECT id, path, created_at FROM allowed_roots ORDER BY created_at').fetchall()
     dynamic_roots = [{**dict(row), 'source': 'dynamic'} for row in rows]
-    return workspace + env_roots + dynamic_roots
+    all_roots = workspace + env_roots + dynamic_roots
+    parsed = [Path(r['path']) for r in all_roots]
+    return [
+        root for i, root in enumerate(all_roots)
+        if not any(_is_strictly_within(parsed[i], parsed[j]) for j in range(len(all_roots)) if j != i)
+    ]
 
 
 def add_allowed_root(raw_path: str) -> dict:

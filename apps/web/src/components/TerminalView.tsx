@@ -82,7 +82,7 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
     // against unconditionally rather than relying on StrictMode being off.
     const raf = requestAnimationFrame(() => {
       if (disposed) return
-      fit.fit()
+      try { fit.fit() } catch { /* see resizeObserver comment below */ }
     })
 
     const dataSubscription = term.onData((data: string) => {
@@ -92,22 +92,40 @@ export function TerminalView({ initialPath }: { initialPath?: string }) {
 
     connect(pathInput)
 
+    // Dragging the OS window edge (easy to do now that this runs inside a
+    // resizable Tauri window, not just a fixed browser viewport) fires this
+    // callback dozens of times per second. Calling xterm's fit() on every
+    // single one of those - each one synchronously re-measuring character
+    // cell dimensions - reintroduced the exact "reading 'dimensions'" crash
+    // even with the disposed-flag guard below, because xterm's own internal
+    // viewport sync (not just this component's code) can still be mid-flight
+    // from the previous call when the next one lands. Debouncing to one
+    // fit() per burst, plus a try/catch as defense-in-depth around xterm's
+    // internals specifically (which this component doesn't control), closes
+    // both the timing race and the crash-the-whole-tab failure mode.
+    let resizeTimeout: ReturnType<typeof setTimeout> | undefined
     const resizeObserver = new ResizeObserver(() => {
-      // Guard against a queued resize callback firing after this effect
-      // instance was already torn down (StrictMode double-invoke, or a
-      // fast tab switch away from Terminal) - calling fit()/reading
-      // term.cols on an already-disposed terminal is exactly what throws
-      // the "reading 'dimensions'" error seen in the dev overlay.
       if (disposed || termRef.current !== term) return
-      fit.fit()
-      const socket = socketRef.current
-      if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        if (disposed || termRef.current !== term) return
+        try {
+          fit.fit()
+          const socket = socketRef.current
+          if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+        } catch {
+          // xterm's internal renderer occasionally throws if it's caught
+          // mid-teardown or the container is momentarily zero-sized during
+          // a fast resize - not fatal, the next resize event fits correctly.
+        }
+      }, 80)
     })
     resizeObserver.observe(containerRef.current)
 
     return () => {
       disposed = true
       cancelAnimationFrame(raf)
+      clearTimeout(resizeTimeout)
       dataSubscription.dispose()
       resizeObserver.disconnect()
       socketRef.current?.close()

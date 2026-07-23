@@ -762,8 +762,73 @@ function SettingsModal({ projects, hardware, ollama, onClose, onChanged, onOpenW
   }
 
   const isOutsideRootsError = /allowed roots/i.test(error)
+  const [browsing, setBrowsing] = useState(false)
 
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/></label>{error && <div className="form-error-block"><p className="form-error">{error}</p>{isOutsideRootsError && <button type="button" className="link-button" onClick={() => void allowFolderAndRetry()} disabled={saving}>Allow this folder & retry</button>}</div>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available ? <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div> : <button className="primary small ollama-setup-button" onClick={onOpenWizard}><Download size={14}/>Set up Ollama</button>}</section><section className="wide"><h3>Allowed folders</h3><p className="helper">Folders InMyAI is allowed to open as a project. The workspace folder is always allowed; folders added here take effect immediately - no .env editing or restart needed.</p><div className="allowed-roots-list">{allowedRoots.map((root) => <div className="allowed-root-row" key={`${root.source}-${root.path}`}><FolderOpen size={15}/><span title={root.path}>{root.path}</span><small>{root.source === 'workspace' ? 'workspace' : root.source === 'env' ? '.env' : 'added'}</small>{root.id !== null && <button className="icon-button" title="Remove" onClick={() => void removeAllowedRoot(root.id!)}><X size={13}/></button>}</div>)}</div><form className="inline-form" onSubmit={addAllowedRoot}><input value={newRoot} onChange={(e) => setNewRoot(e.target.value)} placeholder="C:\\dev or /home/me/projects"/>{rootError && <p className="form-error">{rootError}</p>}<button className="primary small" disabled={addingRoot}>{addingRoot ? <Loader2 className="spin" size={14}/> : <Plus size={14}/>}Allow folder</button></form></section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><header><div><h2>Settings</h2><p>Local paths and model runtimes remain under your control.</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></header><div className="settings-grid"><section><h3>Add a local project</h3><form onSubmit={addProject}><label>Project name<input value={name} onChange={(e) => setName(e.target.value)} required/></label><label>Absolute folder path<div className="path-input-row"><input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\\dev\\my-project or /home/me/project" required/><button type="button" className="secondary small" onClick={() => setBrowsing((current) => !current)}><FolderOpen size={13}/>Browse…</button></div></label>{browsing && <InlineFolderBrowser startPath={path} onSelect={(picked) => { setPath(picked); setBrowsing(false) }} onClose={() => setBrowsing(false)}/>}{error && <div className="form-error-block"><p className="form-error">{error}</p>{isOutsideRootsError && <button type="button" className="link-button" onClick={() => void allowFolderAndRetry()} disabled={saving}>Allow this folder & retry</button>}</div>}<button className="primary" disabled={saving}>{saving ? <Loader2 className="spin" size={16}/> : <Plus size={16}/>}Register project</button></form><p className="helper">For the bundled demo, use the absolute path to <code>examples/synthetic-project</code>. Sensitive credential and system folders are blocked. Or use <strong>Explorer</strong> in the left nav for a bigger, visual way to browse your whole disk.</p></section><section><h3>Runtime status</h3><dl><div><dt>Hardware profile</dt><dd>{hardware?.profile || 'Unknown'}</dd></div><div><dt>Total RAM</dt><dd>{hardware?.ram.total_gb ?? '—'} GB</dd></div><div><dt>Available RAM</dt><dd>{hardware?.ram.available_gb ?? '—'} GB</dd></div><div><dt>Max active models</dt><dd>{hardware?.guard.max_active_models ?? 1}</dd></div><div><dt>Ollama</dt><dd>{ollama?.available ? 'Connected' : 'Not connected'}</dd></div></dl>{ollama?.available ? <div className="model-list">{ollama.models.map((model) => <span key={model.name}>{model.name}</span>)}</div> : <button className="primary small ollama-setup-button" onClick={onOpenWizard}><Download size={14}/>Set up Ollama</button>}</section><section className="wide"><h3>Allowed folders</h3><p className="helper">Folders InMyAI is allowed to open as a project. The workspace folder is always allowed; folders added here take effect immediately - no .env editing or restart needed.</p><div className="allowed-roots-list">{allowedRoots.map((root) => <div className="allowed-root-row" key={`${root.source}-${root.path}`}><FolderOpen size={15}/><span title={root.path}>{root.path}</span><small>{root.source === 'workspace' ? 'workspace' : root.source === 'env' ? '.env' : 'added'}</small>{root.id !== null && <button className="icon-button" title="Remove" onClick={() => void removeAllowedRoot(root.id!)}><X size={13}/></button>}</div>)}</div><form className="inline-form" onSubmit={addAllowedRoot}><input value={newRoot} onChange={(e) => setNewRoot(e.target.value)} placeholder="C:\\dev or /home/me/projects"/>{rootError && <p className="form-error">{rootError}</p>}<button className="primary small" disabled={addingRoot}>{addingRoot ? <Loader2 className="spin" size={14}/> : <Plus size={14}/>}Allow folder</button></form></section><section className="wide"><h3>Registered projects</h3>{projects.map((project) => <div className="registered-project" key={project.id}><FolderOpen size={17}/><div><strong>{project.name}</strong><small>{project.path}</small></div><span>{project.indexed_at ? 'indexed' : 'not indexed'}</span></div>)}</section></div></section></div>
+}
+
+// A small, click-to-browse folder picker embedded directly in the "Add a
+// local project" form, using the same /api/browse endpoint as the Explorer
+// tab. Exists because typing an absolute path by hand (the only option
+// before this) is real friction compared to a native app's "Browse..."
+// button - and a native OS folder-picker dialog isn't available to a
+// browser-based UI at all: even the File System Access API's
+// showDirectoryPicker() deliberately withholds the real filesystem path
+// from JavaScript for privacy reasons, and this app's backend needs an
+// actual absolute path, not a sandboxed handle. This is the closest
+// equivalent reachable from a web page - point-and-click through
+// server-provided directory listings instead of a real native dialog.
+function InlineFolderBrowser({ startPath, onSelect, onClose }: { startPath: string; onSelect: (path: string) => void; onClose: () => void }) {
+  const [current, setCurrent] = useState<BrowseResult | null>(null)
+  const [pathInput, setPathInput] = useState(startPath)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async (target: string) => {
+    setLoading(true); setError('')
+    try {
+      const result = await api<BrowseResult>(`/api/browse?path=${encodeURIComponent(target)}`)
+      setCurrent(result); setPathInput(result.path)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to browse this folder')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // '~' expands to the user's home directory server-side (Path.expanduser())
+  // - a sensible, universal starting point when the path field is empty,
+  // since this is a local-first app where the server and the browser are
+  // always the same machine.
+  useEffect(() => { void load(startPath || '~') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function goUp() { if (current?.parent) void load(current.parent) }
+
+  return <div className="inline-browser" onMouseDown={(e) => e.stopPropagation()}>
+    <form onSubmit={(e) => { e.preventDefault(); void load(pathInput) }}>
+      <input value={pathInput} onChange={(e) => setPathInput(e.target.value)} placeholder="C:\ or /home"/>
+      <button className="secondary small" type="submit">{loading ? <Loader2 className="spin" size={13}/> : 'Go'}</button>
+    </form>
+    {error && <p className="form-error">{error}</p>}
+    {current && <>
+      <div className="inline-browser-toolbar">
+        {current.parent && <button type="button" className="link-button" onClick={goUp}><ChevronLeft size={11}/>Up</button>}
+        <span title={current.path}>{current.path}</span>
+      </div>
+      <div className="inline-browser-list">
+        {current.entries.filter((entry) => entry.is_dir).map((entry) => (
+          <button type="button" key={entry.path} className="inline-browser-row" onClick={() => void load(entry.path)}>
+            <FolderOpen size={13}/><span>{entry.name}</span>{entry.is_project && <small>project</small>}
+          </button>
+        ))}
+        {current.entries.filter((entry) => entry.is_dir).length === 0 && <p className="muted">No subfolders here.</p>}
+      </div>
+      <div className="inline-browser-actions">
+        <button type="button" className="primary small" onClick={() => onSelect(current.path)}><Check size={13}/>Use this folder</button>
+        <button type="button" className="link-button" onClick={onClose}>Cancel</button>
+      </div>
+    </>}
+  </div>
 }
 
 const ONBOARDING_STEPS: { id: OnboardingState['phase']; label: string }[] = [

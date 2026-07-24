@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic'
 import {
   Bot, BrainCircuit, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink,
   FileCode2, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
-  Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PlayCircle, Plus,
+  Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PanelRightClose, PanelRightOpen, PlayCircle, Plus,
   RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
   TerminalSquare, Users, Workflow, X
 } from './Icons'
@@ -49,6 +49,7 @@ const navAdvanced: NavItem[] = [
 // Persisted expanded/collapsed state of the Advanced nav group, so the user's
 // preference survives reloads. Module-scope because it's a stable string key.
 const ADVANCED_NAV_KEY = 'inmyai:nav:advancedExpanded'
+const RAIL_OPEN_KEY = 'inmyai:layout:railOpen'
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -105,6 +106,24 @@ export function Workspace() {
     setAdvancedOpen((current) => {
       const next = !current
       if (typeof window !== 'undefined') window.localStorage.setItem(ADVANCED_NAV_KEY, next ? '1' : '0')
+      return next
+    })
+  }
+
+  // The right-hand Context rail (active project / resource profile / model
+  // runtime / safety policy) is informational, not something acted on every
+  // session - defaults to open but can be tucked away to give the main
+  // column more room, same persisted-toggle pattern as the Advanced nav
+  // group above.
+  const [railOpen, setRailOpen] = useState(true)
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(RAIL_OPEN_KEY) : null
+    if (stored !== null) setRailOpen(stored === '1')
+  }, [])
+  function toggleRail() {
+    setRailOpen((current) => {
+      const next = !current
+      if (typeof window !== 'undefined') window.localStorage.setItem(RAIL_OPEN_KEY, next ? '1' : '0')
       return next
     })
   }
@@ -207,7 +226,7 @@ export function Workspace() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${railOpen ? '' : ' rail-collapsed'}`}>
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><Bot size={17}/></span><div><strong>InMyAI</strong><small>Local AI Workspace</small></div></div>
         <div className="project-picker">
@@ -240,6 +259,7 @@ export function Workspace() {
           <div><h1>{[...navMain, ...navAdvanced].find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : 'Add a local project to begin.'}</p></div>
           <div className="top-actions">
             <button className="icon-button" title="Index project" onClick={indexActiveProject} disabled={!project || busy}>{busy ? <Loader2 className="spin" size={18}/> : <RefreshCw size={18}/>}</button>
+            <button className="icon-button" title={railOpen ? 'Hide context panel' : 'Show context panel'} onClick={toggleRail}>{railOpen ? <PanelRightClose size={18}/> : <PanelRightOpen size={18}/>}</button>
           </div>
         </header>
           {project && indexStatus && (indexStatus.status === 'pending' || indexStatus.status === 'indexing') && (

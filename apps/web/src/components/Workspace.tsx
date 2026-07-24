@@ -352,7 +352,7 @@ export function Workspace() {
             <EmptyProject onOpen={() => setSettingsOpen(true)}/>
           ) : (
             <>
-              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available} ollamaModels={ollama?.models || []} onNavigate={setView}/>}
+              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available} ollamaModels={ollama?.models || []} onRefreshModels={loadSystem} onNavigate={setView}/>}
               {view === 'files' && <FilesView project={project}/>}
               {view === 'memory' && <MemoryView project={project}/>}
               {view === 'graph' && <GraphView project={project}/>}
@@ -385,7 +385,7 @@ function EmptyProject({ onOpen }: { onOpen: () => void }) {
   return <div className="empty-state"><FolderOpen size={38}/><h2>Add a local project</h2><p>InMyAI only indexes folders you explicitly register. Private data stays on your device.</p><button className="primary" onClick={onOpen}><Plus size={16}/>Add project</button></div>
 }
 
-function ChatView({ project, ollamaAvailable, ollamaModels, onNavigate }: { project: Project; ollamaAvailable: boolean; ollamaModels: { name: string }[]; onNavigate: (view: View) => void }) {
+function ChatView({ project, ollamaAvailable, ollamaModels, onRefreshModels, onNavigate }: { project: Project; ollamaAvailable: boolean; ollamaModels: { name: string }[]; onRefreshModels: () => Promise<void>; onNavigate: (view: View) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: `Project ${project.name} is selected. Ask about its architecture, files, decisions, or errors. I will retrieve local context before answering.` }
   ])
@@ -397,6 +397,18 @@ function ChatView({ project, ollamaAvailable, ollamaModels, onNavigate }: { proj
   // override (schemas.ChatRequest.model / choose_ollama_model's `requested`
   // param) before this - it just had no UI control wired to it yet.
   const [ollamaModel, setOllamaModel] = useState('')
+  // The model list only reflects what Ollama had installed when InMyAI
+  // started (Workspace's loadSystem runs once on mount, not on an
+  // interval). If the user runs `ollama pull <model>` in a terminal while
+  // InMyAI is already open, the new model won't show up here until
+  // something re-fetches /api/models/status - this button does that
+  // on demand, without needing a full app restart.
+  const [refreshingModels, setRefreshingModels] = useState(false)
+  async function refreshModels() {
+    if (refreshingModels) return
+    setRefreshingModels(true)
+    try { await onRefreshModels() } finally { setRefreshingModels(false) }
+  }
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [resuming, setResuming] = useState(false)
@@ -578,6 +590,11 @@ function ChatView({ project, ollamaAvailable, ollamaModels, onNavigate }: { proj
                 <option value="">Auto-pick model</option>
                 {ollamaModels.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
               </select>
+            )}
+            {provider === 'ollama' && (
+              <button type="button" className="icon-button" title="Refresh model list (pick up models pulled after InMyAI started)" onClick={() => void refreshModels()} disabled={refreshingModels}>
+                {refreshingModels ? <Loader2 className="spin" size={15}/> : <RefreshCw size={15}/>}
+              </button>
             )}
           </div>
           <button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button>

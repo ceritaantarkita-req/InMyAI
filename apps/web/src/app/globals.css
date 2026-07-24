@@ -148,11 +148,17 @@ pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; whi
 .composer-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 25; display: flex; flex-direction: column; gap: 2px; width: 320px; max-height: 320px; overflow-y: auto; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff; box-shadow: 0 12px 32px rgba(20,28,39,.16); }
 .composer-menu small { display: block; padding: 2px 4px 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .composer-menu p.muted { margin: 0; padding: 8px 4px; color: var(--soft); font-size: 12px; }
-.composer-menu-search { width: 100%; margin-bottom: 6px; padding: 8px 9px; border: 1px solid var(--line-strong); border-radius: 7px; outline: 0; font-size: 12px; font-family: inherit; }
+.composer-menu-search { width: 100%; margin-bottom: 6px; padding: 8px 9px; border: 1px solid var(--line-strong); border-radius: 7px; outline: 0; font-size: 12px; line-height: 1.6; font-family: inherit; }
 .composer-menu-search:focus { border-color: #7aa6eb; box-shadow: 0 0 0 3px #eaf2ff; }
-.composer-menu-browse { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 8px; margin-bottom: 6px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 600; text-align: left; }
+.composer-menu-browse { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 8px; margin-bottom: 6px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--accent); font-size: 12.5px; line-height: 1.6; font-weight: 600; text-align: left; }
 .composer-menu-browse:hover { background: #f1f4f8; }
-.composer-menu button:not(.composer-menu-browse) { display: block; width: 100%; padding: 8px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 12.5px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Deliberately NOT `white-space: nowrap` + `overflow: hidden` + ellipsis for
+   a single line: that combination clipped the top/bottom of the text
+   instead of the sides on this display (reported as text looking "cut in
+   half") - a line-height/font-metrics mismatch under fractional display
+   scaling. Letting long paths wrap across 2-3 lines instead is a simpler,
+   safer render path and shows the full path anyway instead of truncating it. */
+.composer-menu button:not(.composer-menu-browse) { display: block; width: 100%; padding: 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 12.5px; line-height: 1.6; text-align: left; white-space: normal; word-break: break-all; }
 .composer-menu button:not(.composer-menu-browse):hover { background: #f1f4f8; }
 .composer-toolbar > button { align-self: center; min-height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 7px; background: #232a34; color: white; font-size: 10px; }
 .activity-panel { padding: 15px; overflow-y: auto; }

@@ -29,3 +29,24 @@ export async function pickFolderNative(): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false })
   return typeof selected === 'string' ? selected : null
 }
+
+/**
+ * Shows a Yes/Cancel confirmation dialog. Inside Tauri, the webview
+ * intercepts the browser's own `window.confirm()` and routes it through an
+ * IPC command that doesn't exist for this dialog plugin version, throwing
+ * "dialog.confirm not allowed. Command not found" instead of ever showing a
+ * dialog - the same class of gap as the native folder picker: Tauri's
+ * webview isn't a plain browser, so browser-only APIs that happen to also
+ * exist as globals can still silently misbehave. The fix is the same
+ * pattern as `pickFolderNative()`: use the dialog plugin's own `confirm()`
+ * JS function (which goes through the plugin's real, permitted IPC command)
+ * when running inside Tauri, and fall back to the browser's native
+ * `window.confirm()` everywhere else.
+ */
+export async function confirmDialog(message: string, title = 'InMyAI'): Promise<boolean> {
+  if (isTauri()) {
+    const { confirm } = await import('@tauri-apps/plugin-dialog')
+    return confirm(message, { title, kind: 'warning' })
+  }
+  return window.confirm(message)
+}

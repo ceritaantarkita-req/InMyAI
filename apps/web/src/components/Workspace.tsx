@@ -13,7 +13,7 @@ import {
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
-import { isTauri, pickFolderNative } from '@/lib/tauri'
+import { confirmDialog, isTauri, pickFolderNative } from '@/lib/tauri'
 import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
@@ -68,7 +68,7 @@ async function confirmWideFolder(path: string): Promise<'continue' | 'cancel' | 
   }
   if (scope.is_dangerous) {
     const label = scope.dangerous_match || 'a system folder'
-    const ok = window.confirm(
+    const ok = await confirmDialog(
       `"${path}" looks like ${label}. Registering it will index everything inside. Continue?`
     )
     return ok ? 'continue' : 'cancel'

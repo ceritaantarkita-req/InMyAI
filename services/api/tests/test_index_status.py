@@ -157,3 +157,78 @@ def test_indexing_status_is_observable_mid_run_from_another_connection() -> None
     # And the project must end up 'ready' after the thread finishes.
     final = next(p for p in client.get('/api/projects').json() if p['id'] == project['id'])
     assert final['status'] == 'ready'
+
+
+def test_registering_an_already_registered_path_returns_existing_project() -> None:
+    """Bug found via real Explorer use: clicking "Open as project" on a
+    folder that's already registered used to bubble a raw
+    'UNIQUE constraint failed: projects.path' SQLite error to the UI.
+    Re-registering the same path must instead just return the existing
+    project, unchanged, with no duplicate row and no error."""
+    root = _fresh_project_dir('idx_dup')
+    first = client.post('/api/projects', json={'name': 'IdxDup', 'path': str(root)})
+    assert first.status_code == 200, first.text
+    first_project = first.json()
+
+    second = client.post('/api/projects', json={'name': 'IdxDupAgain', 'path': str(root)})
+    assert second.status_code == 200, second.text
+    second_project = second.json()
+
+    assert second_project['id'] == first_project['id']
+    # The original name is preserved - re-registering doesn't rename it.
+    assert second_project['name'] == first_project['name']
+
+    all_projects = client.get('/api/projects').json()
+    matching = [p for p in all_projects if p['path'] == first_project['path']]
+    assert len(matching) == 1, 'duplicate registration must not create a second row'
+
+
+def test_legacy_ready_project_without_indexed_at_is_backfilled_to_pending() -> None:
+    """Bug found via real use: a project row inserted before auto-indexing
+    existed defaults to status='ready' with indexed_at IS NULL - a state the
+    current code never revisits on its own, so it stays permanently
+    unindexed. migrate()'s compatibility backfill must requeue it as
+    'pending', and list_projects_needing_index() must then pick it up."""
+    from services.api.app.database import migrate, transaction
+    from services.api.app import services as svc
+
+    root = _fresh_project_dir('idx_legacy')
+    now = '2020-01-01T00:00:00+00:00'
+    with transaction() as conn:
+        cur = conn.execute(
+            "INSERT INTO projects(name,path,created_at,status) VALUES(?,?,?,'ready')",
+            ('IdxLegacy', str(root), now),
+        )
+        legacy_id = cur.lastrowid
+
+    # Before migrate() runs again, the row is still (incorrectly) 'ready'.
+    fetched = next(p for p in client.get('/api/projects').json() if p['id'] == legacy_id)
+    assert fetched['status'] == 'ready'
+    assert fetched['indexed_at'] is None
+
+    migrate()  # idempotent - safe to call again, this is what re-runs on every startup
+
+    fetched = next(p for p in client.get('/api/projects').json() if p['id'] == legacy_id)
+    assert fetched['status'] == 'pending'
+
+    needing = svc.list_projects_needing_index()
+    assert any(p['id'] == legacy_id for p in needing)
+
+
+def test_migrate_backfill_does_not_touch_already_indexed_projects() -> None:
+    """The backfill must be scoped to indexed_at IS NULL specifically - a
+    normally-completed project (status='ready', indexed_at set) must not be
+    reset to 'pending' every time migrate() runs, or it would be
+    re-indexed on every single app startup for no reason."""
+    from services.api.app.database import migrate
+
+    root = _fresh_project_dir('idx_already_done')
+    project = client.post('/api/projects', json={'name': 'IdxDone', 'path': str(root)}).json()
+    fetched = next(p for p in client.get('/api/projects').json() if p['id'] == project['id'])
+    assert fetched['status'] == 'ready'
+    assert fetched['indexed_at'] is not None
+
+    migrate()
+
+    fetched_again = next(p for p in client.get('/api/projects').json() if p['id'] == project['id'])
+    assert fetched_again['status'] == 'ready'

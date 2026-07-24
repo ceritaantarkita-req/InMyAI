@@ -184,16 +184,29 @@ def create_project(name: str, raw_path: str) -> dict:
     if not path.is_dir():
         raise ValueError('Project path must be a directory.')
     now = utc_now()
-    with transaction() as conn:
-        cur = conn.execute(
-            'INSERT INTO projects(name,path,created_at,status) VALUES(?,?,?,?)',
-            (name.strip(), str(path), now, 'pending')
-        )
-        project_id = cur.lastrowid
-        conn.execute(
-            'INSERT INTO audit_log(project_id,action,detail,created_at) VALUES(?,?,?,?)',
-            (project_id, 'project.created', str(path), now)
-        )
+    try:
+        with transaction() as conn:
+            cur = conn.execute(
+                'INSERT INTO projects(name,path,created_at,status) VALUES(?,?,?,?)',
+                (name.strip(), str(path), now, 'pending')
+            )
+            project_id = cur.lastrowid
+            conn.execute(
+                'INSERT INTO audit_log(project_id,action,detail,created_at) VALUES(?,?,?,?)',
+                (project_id, 'project.created', str(path), now)
+            )
+    except sqlite3.IntegrityError:
+        # This exact folder is already registered (e.g. clicking "Open as
+        # project" in Explorer on a folder that's already a project, or a
+        # duplicate registration attempt from the Settings form). Opening an
+        # already-registered folder should just switch to it, not surface a
+        # raw "UNIQUE constraint failed" error - the same forgiving pattern
+        # already used for duplicate allowed-roots (add_allowed_root above).
+        with connect() as conn:
+            existing = conn.execute('SELECT id FROM projects WHERE path=?', (str(path),)).fetchone()
+        if existing:
+            return get_project(existing['id'])
+        raise
     return get_project(project_id)
 
 
@@ -638,3 +651,18 @@ def reset_interrupted_indexing() -> None:
                 "ON CONFLICT(project_id) DO UPDATE SET phase='failed',error=excluded.error,updated_at=excluded.updated_at",
                 (row['id'], 'failed', 0, 0, now, now, 'interrupted: indexing did not complete'),
             )
+
+
+def list_projects_needing_index() -> list[dict]:
+    """Projects that have never been successfully indexed and aren't already
+    in flight - covers both a freshly-created 'pending' row where the app
+    crashed before its background task ran, and legacy rows created before
+    auto-indexing existed (backfilled to 'pending' by database.py's
+    migrate()). Called once at startup (main.py's lifespan) to sweep up
+    anything left unindexed, since nothing else in the app proactively
+    revisits a project once it's sitting at rest."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, path FROM projects WHERE status='pending' AND indexed_at IS NULL"
+        ).fetchall()
+    return [dict(row) for row in rows]

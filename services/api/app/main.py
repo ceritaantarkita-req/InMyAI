@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -34,6 +35,16 @@ async def lifespan(_app: FastAPI):
     # every process start.
     services.sync_allowed_roots()
     services.reset_interrupted_indexing()
+    # Sweep up any project that's never been indexed - either a legacy row
+    # from before auto-indexing existed (backfilled to 'pending' by
+    # migrate()), or a 'pending' row left over from a crash before its
+    # background task ran. Each runs on its own daemon thread rather than
+    # blocking startup, since a project can point at an arbitrarily large
+    # folder.
+    for pending in services.list_projects_needing_index():
+        threading.Thread(
+            target=index_project, args=(pending['id'], Path(pending['path'])), daemon=True
+        ).start()
     yield
 
 
@@ -230,7 +241,12 @@ def create_project(payload: ProjectCreate, background_tasks: BackgroundTasks) ->
         project = services.create_project(payload.name, payload.path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    background_tasks.add_task(index_project, project['id'], Path(project['path']))
+    # services.create_project() returns the EXISTING project (unchanged
+    # status) when this path was already registered, rather than raising -
+    # only schedule a background index for a genuinely new/pending project,
+    # so re-opening an already-indexed folder doesn't needlessly re-scan it.
+    if project['status'] == 'pending':
+        background_tasks.add_task(index_project, project['id'], Path(project['path']))
     return project
 
 

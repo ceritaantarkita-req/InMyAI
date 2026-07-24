@@ -203,6 +203,17 @@ def migrate() -> None:
                 if 'duplicate column name' not in str(exc).lower():
                     raise
 
+        # Compatibility backfill: projects created before auto-indexing
+        # existed default to status='ready' (the old default) with
+        # indexed_at IS NULL, since nothing back then ever set indexed_at
+        # until a manual index click. Nothing in the current code flips that
+        # status either - 'ready' short-circuits the "needs indexing"
+        # checks everywhere else - so without this, a project registered
+        # before this feature shipped stays silently, permanently unindexed.
+        # Requeuing it as 'pending' lets the startup sweep in main.py's
+        # lifespan (services.list_projects_needing_index) pick it up.
+        conn.execute("UPDATE projects SET status='pending' WHERE status='ready' AND indexed_at IS NULL")
+
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:
     return dict(row) if row is not None else None

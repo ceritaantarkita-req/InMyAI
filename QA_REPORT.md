@@ -1,19 +1,19 @@
 # InMyAI QA Report
 
-Date: 2026-07-23 (updated after the Explorer + Terminal tabs; earlier updates from the v1/v2 merge + Agents Workspace panel + config fix are folded in below; original visual pass is from 2026-07-21 and is called out explicitly where it has not been re-verified)
+Date: 2026-07-24 (updated after Phase 2's core-flow fixes; earlier updates from the Explorer + Terminal tabs, the v1/v2 merge, Agents Workspace panel, and config fix are folded in below; original visual pass is from 2026-07-21 and is called out explicitly where it has not been re-verified)
 
 ## Automated result (this session)
 
 | Check | Result |
 |---|---|
 | Strict TypeScript (`tsc --noEmit`) | PASS |
-| Frontend tests (`node --test`) | 14/14 PASS |
-| FastAPI tests (`pytest services/api/tests`) | 115/115 PASS |
+| Frontend tests (`node --test`) | 15/15 PASS |
+| FastAPI tests (`pytest services/api/tests`) | 134/134 PASS |
 | In-process API smoke check (`scripts/smoke_check.py`) | PASS — see `SMOKE_REPORT.json` |
 | Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
 | Next.js production build (`next build`) | PASS — see note below |
-| Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal tabs |
-| Tauri desktop shell (`cargo tauri dev`) | PASS — confirmed on Windows: compiled clean, opened a real native window. One bug found and fixed on that first run (`allowedDevOrigins` in `next.config.mjs`), see `docs/decisions/tauri-desktop-shell.md` section 7 |
+| Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal/Phase-2-nav tabs |
+| Tauri desktop shell (`cargo tauri dev`) | PASS — confirmed on Windows: compiled clean, opened a real native window. Two bugs found and fixed on first runs (`allowedDevOrigins` in `next.config.mjs`, missing `capabilities/default.json`), see `docs/decisions/tauri-desktop-shell.md` sections 7–8 |
 
 `next build` was run against a copy of `apps/web` outside this sandbox's
 FUSE-mounted project folder (an `rsync` into `/tmp`, `node_modules` fetched
@@ -26,19 +26,28 @@ actually verifies the build, not a substitute for it. Your own machine's
 normal filesystem doesn't have this constraint; `npm run build` there
 should just work.
 
-The 115 backend tests include everything from the original P0 build plus
+The 134 backend tests include everything from the original P0 build plus
 regression coverage added since: multi-agent task orchestration
 (`test_agent_runtime.py`), PPTX indexing (`test_office_indexing.py`),
 stale-write detection (`test_core.py`), the dependency-free `apps/local-ui`
 static mount (`test_local_ui.py`), the `INMYAI_*` env-prefix binding fix
 (`test_config.py`), the mind-map browse endpoint (`test_browse.py`, 8
 tests), the interactive terminal's `PtySession` (`test_terminal.py`, 5
-tests), and the UI-managed allowed-roots settings (`test_allowed_roots.py`,
-8 tests). `test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
-blame) is part of that 115 and passes cleanly on a normal filesystem; see
+tests), the UI-managed allowed-roots settings (`test_allowed_roots.py`,
+8 tests), and Phase 2's core-flow fixes: background auto-indexing with a
+queryable status machine (`test_index_status.py`, 7 tests), the
+folder-scope guardrail (`test_folder_scope.py`, 9 tests), and the Graphify
+import HTTP endpoint (2 new tests appended to `test_import_graphify.py`).
+`test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
+blame) is part of that 134 and passes cleanly on a normal filesystem; see
 the note in `docs/decisions/v1-v2-merge-and-agents-panel.md` if it fails
 specifically inside a FUSE-mounted sandbox directory — that is an
-environment artifact, not a code defect.
+environment artifact, not a code defect. Running all 134 as one command in
+this sandbox occasionally exceeds a 40-second budget purely from cumulative
+FUSE I/O (auto-indexing now runs on every project any test file creates,
+not just indexing-specific tests) — confirmed as slowness, not a hang, by
+running the same 134 tests split into three batches, all green in under a
+minute combined; see `docs/decisions/phase2-core-flow.md` section 6.
 
 ## What changed since the 2026-07-21 pass
 
@@ -70,10 +79,19 @@ environment artifact, not a code defect.
   desktop:dev`): dev-mode native window + a real OS folder picker, wired
   into Settings and Explorer. Production installer packaging is a
   follow-up (see `docs/decisions/tauri-desktop-shell.md`).
+- Phase 2 core-flow fixes: new projects now auto-index in the background
+  with a visible progress banner instead of silently requiring a manual
+  click; a folder-scope guardrail warns before registering a system/
+  profile/drive-root folder; Explorer can overlay a project's code
+  relations (the same data Graph shows) directly on its radial browser,
+  and Graph gained a real Graphify `graph.json` import button; the 9-tab
+  sidebar is now a 5-item Main group plus a collapsible Advanced group
+  (Memory/Studio/Git/Agents), persisted per-user in `localStorage`. See
+  `docs/decisions/phase2-core-flow.md`.
 
 Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`,
 `docs/decisions/explorer-and-terminal.md`, `docs/decisions/allowed-roots-ui.md`,
-and `docs/decisions/tauri-desktop-shell.md`.
+`docs/decisions/tauri-desktop-shell.md`, and `docs/decisions/phase2-core-flow.md`.
 
 ## Smoke workflow
 
@@ -134,4 +152,4 @@ No unapproved marketing hero, decorative eyebrow, fake metric, or capability cla
 
 ## Conclusion
 
-Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, and the interactive Terminal all pass their automated tests (115 backend + 14 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.
+Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, the interactive Terminal, and the Phase 2 core-flow fixes (auto-indexing, folder-scope guardrail, Explorer+Graph relations overlay, Main/Advanced nav split) all pass their automated tests (134 backend + 15 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.

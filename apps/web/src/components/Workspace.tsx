@@ -352,7 +352,7 @@ export function Workspace() {
             <EmptyProject onOpen={() => setSettingsOpen(true)}/>
           ) : (
             <>
-              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available} onNavigate={setView}/>}
+              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available} ollamaModels={ollama?.models || []} onNavigate={setView}/>}
               {view === 'files' && <FilesView project={project}/>}
               {view === 'memory' && <MemoryView project={project}/>}
               {view === 'graph' && <GraphView project={project}/>}
@@ -385,12 +385,18 @@ function EmptyProject({ onOpen }: { onOpen: () => void }) {
   return <div className="empty-state"><FolderOpen size={38}/><h2>Add a local project</h2><p>InMyAI only indexes folders you explicitly register. Private data stays on your device.</p><button className="primary" onClick={onOpen}><Plus size={16}/>Add project</button></div>
 }
 
-function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; ollamaAvailable: boolean; onNavigate: (view: View) => void }) {
+function ChatView({ project, ollamaAvailable, ollamaModels, onNavigate }: { project: Project; ollamaAvailable: boolean; ollamaModels: { name: string }[]; onNavigate: (view: View) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: `Project ${project.name} is selected. Ask about its architecture, files, decisions, or errors. I will retrieve local context before answering.` }
   ])
   const [input, setInput] = useState('')
   const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama'>('auto')
+  // '' means "let the backend pick" (its own registry-based heuristic,
+  // matched to task type + hardware profile) - only meaningful once
+  // provider is 'ollama'. The backend already supported an explicit model
+  // override (schemas.ChatRequest.model / choose_ollama_model's `requested`
+  // param) before this - it just had no UI control wired to it yet.
+  const [ollamaModel, setOllamaModel] = useState('')
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [resuming, setResuming] = useState(false)
@@ -503,7 +509,7 @@ function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; 
       : typed
     setMessages((current) => [...current, { role: 'user', content: message }]); setInput(''); setAttachments([]); setSending(true)
     try {
-      const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider }) })
+      const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider, model: provider === 'ollama' && ollamaModel ? ollamaModel : undefined }) })
       setConversationId(result.conversation_id)
       if (typeof window !== 'undefined') window.localStorage.setItem(conversationStorageKey(project.id), String(result.conversation_id))
       setMessages((current) => [...current, { role: 'assistant', content: result.answer, route: result.route, citations: result.citations }])
@@ -567,6 +573,12 @@ function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; 
               <option value="mock">Safe mock</option>
               <option value="ollama" disabled={!ollamaAvailable}>Ollama local</option>
             </select>
+            {provider === 'ollama' && ollamaModels.length > 0 && (
+              <select className="composer-model" title="Ollama model" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)}>
+                <option value="">Auto-pick model</option>
+                {ollamaModels.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+              </select>
+            )}
           </div>
           <button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button>
         </div>

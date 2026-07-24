@@ -5,10 +5,10 @@ import type { CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Bot, BrainCircuit, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink,
-  FileCode2, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
-  Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PanelRightClose, PanelRightOpen, PlayCircle, Plus,
+  FileCode2, FileInput, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
+  Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PanelRightClose, PanelRightOpen, Paperclip, PlayCircle, Plus,
   RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
-  TerminalSquare, Users, Workflow, X
+  TerminalSquare, Users, Wrench, Workflow, X
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
@@ -287,7 +287,7 @@ export function Workspace() {
             <EmptyProject onOpen={() => setSettingsOpen(true)}/>
           ) : (
             <>
-              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available}/>}
+              {view === 'chat' && <ChatView project={project} ollamaAvailable={!!ollama?.available} onNavigate={setView}/>}
               {view === 'files' && <FilesView project={project}/>}
               {view === 'memory' && <MemoryView project={project}/>}
               {view === 'graph' && <GraphView project={project}/>}
@@ -320,7 +320,7 @@ function EmptyProject({ onOpen }: { onOpen: () => void }) {
   return <div className="empty-state"><FolderOpen size={38}/><h2>Add a local project</h2><p>InMyAI only indexes folders you explicitly register. Private data stays on your device.</p><button className="primary" onClick={onOpen}><Plus size={16}/>Add project</button></div>
 }
 
-function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvailable: boolean }) {
+function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; ollamaAvailable: boolean; onNavigate: (view: View) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: `Project ${project.name} is selected. Ask about its architecture, files, decisions, or errors. I will retrieve local context before answering.` }
   ])
@@ -330,6 +330,33 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [resuming, setResuming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Composer toolbar: attach (reference a file by path, best-effort context
+  // hint) and insert (paste a file's actual content into the message so it's
+  // guaranteed to be part of what's sent) both need the project's indexed
+  // file list; fetched once and reused by both menus.
+  const [indexedFiles, setIndexedFiles] = useState<IndexedFile[]>([])
+  useEffect(() => { void api<IndexedFile[]>(`/api/projects/${project.id}/files`).then(setIndexedFiles).catch(() => setIndexedFiles([])) }, [project.id])
+  const [openMenu, setOpenMenu] = useState<'attach' | 'insert' | 'tools' | null>(null)
+  const [attachments, setAttachments] = useState<string[]>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  function addAttachment(path: string) {
+    setAttachments((current) => (current.includes(path) ? current : [...current, path]))
+    setOpenMenu(null)
+  }
+  function removeAttachment(path: string) {
+    setAttachments((current) => current.filter((item) => item !== path))
+  }
+  async function insertFileContent(path: string) {
+    setOpenMenu(null)
+    try {
+      const result = await api<{ content: string }>(`/api/projects/${project.id}/file?path=${encodeURIComponent(path)}`)
+      const snippet = `\n\n\`\`\`${path}\n${result.content.slice(0, 4000)}${result.content.length > 4000 ? '\n… (truncated)' : ''}\n\`\`\`\n`
+      setInput((current) => current + snippet)
+      textareaRef.current?.focus()
+    } catch { /* file may have been removed since indexing; silently no-op */ }
+  }
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -376,8 +403,16 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
   }
 
   async function send() {
-    const message = input.trim(); if (!message || sending) return
-    setMessages((current) => [...current, { role: 'user', content: message }]); setInput(''); setSending(true)
+    const typed = input.trim(); if (!typed || sending) return
+    // Attachments are a best-effort context hint, not a guaranteed override:
+    // naming the file explicitly in the message text gives the backend's
+    // retrieval a stronger signal to pull that file in, but (unlike Insert,
+    // which pastes real content) doesn't force it. Shown to the user as the
+    // literal text that gets sent, so there's no hidden behavior.
+    const message = attachments.length
+      ? `${typed}\n\nReferenced file(s): ${attachments.join(', ')}`
+      : typed
+    setMessages((current) => [...current, { role: 'user', content: message }]); setInput(''); setAttachments([]); setSending(true)
     try {
       const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider }) })
       setConversationId(result.conversation_id)
@@ -390,9 +425,58 @@ function ChatView({ project, ollamaAvailable }: { project: Project; ollamaAvaila
 
   return <div className="chat-layout">
     <section className="chat-panel">
-      <div className="chat-toolbar"><div><strong>Project conversation</strong><small>{conversationId ? `Conversation #${conversationId}` : 'New conversation'} · context is retrieved from indexed files and active decisions.</small></div><div className="chat-toolbar-actions"><button className="icon-button" title="Start a new conversation" onClick={startNewConversation} disabled={!!resuming || sending}><Plus size={16}/></button><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}><option value="auto">Automatic router</option><option value="mock">Safe mock</option><option value="ollama" disabled={!ollamaAvailable}>Ollama local</option></select></div></div>
+      <div className="chat-toolbar"><div><strong>Project conversation</strong><small>{conversationId ? `Conversation #${conversationId}` : 'New conversation'} · context is retrieved from indexed files and active decisions.</small></div><div className="chat-toolbar-actions"><button className="icon-button" title="Start a new conversation" onClick={startNewConversation} disabled={!!resuming || sending}><Plus size={16}/></button></div></div>
       <div className="messages">{messages.map((message, index) => <article key={index} className={`message ${message.role}`}><div className="avatar">{message.role === 'assistant' ? <Bot size={16}/> : 'U'}</div><div className="message-body"><pre>{message.content}</pre>{message.route && <div className="route-card"><strong>{message.route.engine}</strong><span>{message.route.reason}</span><small>{message.route.estimated_ram_mb ?? '—'} MB estimate · {message.route.context_limit?.toLocaleString() ?? '—'} token budget</small></div>}{message.citations?.length ? <div className="citations"><b>Sources</b>{message.citations.map((source) => <span key={source.relative_path}>{source.relative_path}</span>)}</div> : null}</div></article>)}{sending && <article className="message assistant"><div className="avatar"><Bot size={16}/></div><div className="message-body typing"><span/><span/><span/></div></article>}<div ref={bottomRef}/></div>
-      <div className="composer"><textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }} placeholder="Ask about this project…"/><button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button></div>
+      <div className="composer">
+        {openMenu && <div className="composer-menu-backdrop" onClick={() => setOpenMenu(null)}/>}
+        {attachments.length > 0 && (
+          <div className="composer-chips">
+            {attachments.map((path) => <span key={path} className="composer-chip"><Paperclip size={11}/>{path}<button type="button" onClick={() => removeAttachment(path)} aria-label={`Remove ${path}`}><X size={11}/></button></span>)}
+          </div>
+        )}
+        <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }} placeholder="Ask about this project…"/>
+        <div className="composer-toolbar">
+          <div className="composer-tools">
+            <div className="composer-menu-anchor">
+              <button type="button" className="icon-button" title="Attach an indexed file" onClick={() => setOpenMenu(openMenu === 'attach' ? null : 'attach')}><Paperclip size={15}/></button>
+              {openMenu === 'attach' && (
+                <div className="composer-menu">
+                  <small>Reference a file (best-effort hint, not a guarantee it's read)</small>
+                  {indexedFiles.length === 0 && <p className="muted">No indexed files yet.</p>}
+                  {indexedFiles.map((file) => <button key={file.id} type="button" onClick={() => addAttachment(file.relative_path)}>{file.relative_path}</button>)}
+                </div>
+              )}
+            </div>
+            <div className="composer-menu-anchor">
+              <button type="button" className="icon-button" title="Insert a file's content into the message" onClick={() => setOpenMenu(openMenu === 'insert' ? null : 'insert')}><FileInput size={15}/></button>
+              {openMenu === 'insert' && (
+                <div className="composer-menu">
+                  <small>Paste file content into your message</small>
+                  {indexedFiles.length === 0 && <p className="muted">No indexed files yet.</p>}
+                  {indexedFiles.map((file) => <button key={file.id} type="button" onClick={() => void insertFileContent(file.relative_path)}>{file.relative_path}</button>)}
+                </div>
+              )}
+            </div>
+            <div className="composer-menu-anchor">
+              <button type="button" className="icon-button" title="Tools" onClick={() => setOpenMenu(openMenu === 'tools' ? null : 'tools')}><Wrench size={15}/></button>
+              {openMenu === 'tools' && (
+                <div className="composer-menu">
+                  <small>Jump to a tool</small>
+                  <button type="button" onClick={() => { setOpenMenu(null); onNavigate('studio') }}>OCR &amp; extract (Studio)</button>
+                  <button type="button" onClick={() => { setOpenMenu(null); onNavigate('studio') }}>Generate image (Studio)</button>
+                  <button type="button" onClick={() => { setOpenMenu(null); onNavigate('graph') }}>Explore code relations (Graph)</button>
+                </div>
+              )}
+            </div>
+            <select className="composer-model" title="Model / provider" value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
+              <option value="auto">Automatic router</option>
+              <option value="mock">Safe mock</option>
+              <option value="ollama" disabled={!ollamaAvailable}>Ollama local</option>
+            </select>
+          </div>
+          <button onClick={send} disabled={!input.trim() || sending}><Send size={16}/><span>Send</span></button>
+        </div>
+      </div>
     </section>
     <aside className="activity-panel"><h3>Suggested tasks</h3>{['Explain the architecture', 'Find active database decisions', 'Trace the login dependency path', 'Search for TODO and FIXME'].map((item) => <button key={item} onClick={() => setInput(item)}>{item}<span>↗</span></button>)}<div className="safety-box"><ShieldCheck size={18}/><div><strong>Controlled tools</strong><p>File changes require a diff, explicit approval, and an automatic backup.</p></div></div></aside>
   </div>

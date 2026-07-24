@@ -31,6 +31,28 @@ export async function pickFolderNative(): Promise<string | null> {
 }
 
 /**
+ * Opens a native OS *file* picker (as opposed to `pickFolderNative`'s
+ * directory picker) and returns the chosen absolute path, or null if
+ * cancelled or not running inside Tauri. Used by Chat's Attach button so a
+ * user can reference any file on disk - a document, image, archive,
+ * whatever - not just files already indexed into the active project.
+ *
+ * Deliberately does NOT read the file's content: only Insert (which reads
+ * through `/api/projects/{id}/file`, scoped to files already inside an
+ * indexed, allowed project) can guarantee content is actually sent to the
+ * model. A path picked here that lives outside any allowed root is still
+ * just a text reference in the message - the backend's access-control
+ * policy (the same one behind "allowed roots" in Settings) is not
+ * bypassed by this picker, on purpose.
+ */
+export async function pickFileNative(): Promise<string | null> {
+  if (!isTauri()) return null
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ directory: false, multiple: false })
+  return typeof selected === 'string' ? selected : null
+}
+
+/**
  * Shows a Yes/Cancel confirmation dialog. Inside Tauri, the webview
  * intercepts the browser's own `window.confirm()` and routes it through an
  * IPC command that doesn't exist for this dialog plugin version, throwing

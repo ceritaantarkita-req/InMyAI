@@ -14,7 +14,7 @@ import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
 import { clampPanelWidth, RAIL_DEFAULT, RAIL_MAX, RAIL_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '@/lib/layout'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
-import { confirmDialog, isTauri, pickFolderNative } from '@/lib/tauri'
+import { confirmDialog, isTauri, pickFileNative, pickFolderNative } from '@/lib/tauri'
 import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
@@ -404,8 +404,20 @@ function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; 
   useEffect(() => { void api<IndexedFile[]>(`/api/projects/${project.id}/files`).then(setIndexedFiles).catch(() => setIndexedFiles([])) }, [project.id])
   const [openMenu, setOpenMenu] = useState<'attach' | 'insert' | 'tools' | null>(null)
   const [attachments, setAttachments] = useState<string[]>([])
+  const [fileFilter, setFileFilter] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // A project can easily have hundreds of indexed files (see the earlier
+  // "tes" project pointing at a whole parent folder) - a flat unfiltered
+  // list is unusable at that size, hence the search box in both menus.
+  const filteredFiles = fileFilter.trim()
+    ? indexedFiles.filter((file) => file.relative_path.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+    : indexedFiles
+
+  function openComposerMenu(menu: 'attach' | 'insert' | 'tools') {
+    setFileFilter('')
+    setOpenMenu((current) => (current === menu ? null : menu))
+  }
   function addAttachment(path: string) {
     setAttachments((current) => (current.includes(path) ? current : [...current, path]))
     setOpenMenu(null)
@@ -421,6 +433,18 @@ function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; 
       setInput((current) => current + snippet)
       textareaRef.current?.focus()
     } catch { /* file may have been removed since indexing; silently no-op */ }
+  }
+  // Any file on disk, not just ones already indexed into this project - a
+  // document, image, archive, whatever. Only available inside the Tauri
+  // desktop shell (isTauri()), since a plain browser can't hand back a real
+  // absolute path. This only adds a path REFERENCE (a chip, same as
+  // addAttachment) - it deliberately does not read the file's content,
+  // since doing that for an arbitrary path outside any indexed/allowed
+  // project would bypass the same access-control boundary the "allowed
+  // roots" Settings feature exists to enforce.
+  async function browseForFile() {
+    const picked = await pickFileNative()
+    if (picked) addAttachment(picked)
   }
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -503,27 +527,32 @@ function ChatView({ project, ollamaAvailable, onNavigate }: { project: Project; 
         <div className="composer-toolbar">
           <div className="composer-tools">
             <div className="composer-menu-anchor">
-              <button type="button" className="icon-button" title="Attach an indexed file" onClick={() => setOpenMenu(openMenu === 'attach' ? null : 'attach')}><Paperclip size={15}/></button>
+              <button type="button" className="icon-button" title="Attach a file" onClick={() => openComposerMenu('attach')}><Paperclip size={15}/></button>
               {openMenu === 'attach' && (
                 <div className="composer-menu">
-                  <small>Reference a file (best-effort hint, not a guarantee it's read)</small>
+                  <small>Reference a file - best-effort hint, not a guarantee it&apos;s read</small>
+                  {isTauri() && <button type="button" className="composer-menu-browse" onClick={() => void browseForFile()}><FolderOpen size={13}/>Browse for a file on disk…</button>}
+                  <input className="composer-menu-search" type="text" placeholder="Filter indexed files…" value={fileFilter} onChange={(e) => setFileFilter(e.target.value)} autoFocus/>
                   {indexedFiles.length === 0 && <p className="muted">No indexed files yet.</p>}
-                  {indexedFiles.map((file) => <button key={file.id} type="button" onClick={() => addAttachment(file.relative_path)}>{file.relative_path}</button>)}
+                  {indexedFiles.length > 0 && filteredFiles.length === 0 && <p className="muted">No match.</p>}
+                  {filteredFiles.map((file) => <button key={file.id} type="button" onClick={() => addAttachment(file.relative_path)}>{file.relative_path}</button>)}
                 </div>
               )}
             </div>
             <div className="composer-menu-anchor">
-              <button type="button" className="icon-button" title="Insert a file's content into the message" onClick={() => setOpenMenu(openMenu === 'insert' ? null : 'insert')}><FileInput size={15}/></button>
+              <button type="button" className="icon-button" title="Insert a file's content into the message" onClick={() => openComposerMenu('insert')}><FileInput size={15}/></button>
               {openMenu === 'insert' && (
                 <div className="composer-menu">
-                  <small>Paste file content into your message</small>
+                  <small>Pastes real file content - only files already indexed into this project (arbitrary disk paths can&apos;t be read here, by the same policy behind Settings &gt; Allowed folders)</small>
+                  <input className="composer-menu-search" type="text" placeholder="Filter indexed files…" value={fileFilter} onChange={(e) => setFileFilter(e.target.value)} autoFocus/>
                   {indexedFiles.length === 0 && <p className="muted">No indexed files yet.</p>}
-                  {indexedFiles.map((file) => <button key={file.id} type="button" onClick={() => void insertFileContent(file.relative_path)}>{file.relative_path}</button>)}
+                  {indexedFiles.length > 0 && filteredFiles.length === 0 && <p className="muted">No match.</p>}
+                  {filteredFiles.map((file) => <button key={file.id} type="button" onClick={() => void insertFileContent(file.relative_path)}>{file.relative_path}</button>)}
                 </div>
               )}
             </div>
             <div className="composer-menu-anchor">
-              <button type="button" className="icon-button" title="Tools" onClick={() => setOpenMenu(openMenu === 'tools' ? null : 'tools')}><Wrench size={15}/></button>
+              <button type="button" className="icon-button" title="Tools" onClick={() => openComposerMenu('tools')}><Wrench size={15}/></button>
               {openMenu === 'tools' && (
                 <div className="composer-menu">
                   <small>Jump to a tool</small>

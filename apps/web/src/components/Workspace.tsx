@@ -12,6 +12,7 @@ import {
 } from './Icons'
 import { api, API_URL } from '@/lib/api'
 import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-history'
+import { clampPanelWidth, RAIL_DEFAULT, RAIL_MAX, RAIL_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '@/lib/layout'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
 import { confirmDialog, isTauri, pickFolderNative } from '@/lib/tauri'
 import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
@@ -50,6 +51,9 @@ const navAdvanced: NavItem[] = [
 // preference survives reloads. Module-scope because it's a stable string key.
 const ADVANCED_NAV_KEY = 'inmyai:nav:advancedExpanded'
 const RAIL_OPEN_KEY = 'inmyai:layout:railOpen'
+const SIDEBAR_WIDTH_KEY = 'inmyai:layout:sidebarWidth'
+const RAIL_WIDTH_KEY = 'inmyai:layout:railWidth'
+const NARROW_BREAKPOINT = '(max-width: 1180px)'
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -127,6 +131,65 @@ export function Workspace() {
       return next
     })
   }
+
+  // Draggable sidebar/context-rail widths. Below NARROW_BREAKPOINT the
+  // sidebar keeps its stored width but the rail always collapses to 0
+  // regardless of railOpen/railWidth - re-implementing what used to be a
+  // pure-CSS media query in JS, since an inline style (needed for live
+  // drag feedback) always wins over a stylesheet media query and would
+  // otherwise defeat the narrow-viewport fallback.
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
+  const [railWidth, setRailWidth] = useState(RAIL_DEFAULT)
+  const [isNarrow, setIsNarrow] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const storedSidebar = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    if (storedSidebar) setSidebarWidth(clampPanelWidth(storedSidebar, SIDEBAR_MIN, SIDEBAR_MAX))
+    const storedRail = Number(window.localStorage.getItem(RAIL_WIDTH_KEY))
+    if (storedRail) setRailWidth(clampPanelWidth(storedRail, RAIL_MIN, RAIL_MAX))
+
+    const media = window.matchMedia(NARROW_BREAKPOINT)
+    setIsNarrow(media.matches)
+    const onChange = (event: MediaQueryListEvent) => setIsNarrow(event.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+
+  const startResize = useCallback((edge: 'sidebar' | 'rail') => (event: React.MouseEvent) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = edge === 'sidebar' ? sidebarWidth : railWidth
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    function onMove(moveEvent: MouseEvent) {
+      // The sidebar grows to the right (drag right = wider), the rail is on
+      // the opposite edge and grows to the left (drag left = wider) - hence
+      // the sign flip between the two.
+      const delta = moveEvent.clientX - startX
+      if (edge === 'sidebar') {
+        const next = clampPanelWidth(startWidth + delta, SIDEBAR_MIN, SIDEBAR_MAX)
+        setSidebarWidth(next)
+        window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next))
+      } else {
+        const next = clampPanelWidth(startWidth - delta, RAIL_MIN, RAIL_MAX)
+        setRailWidth(next)
+        window.localStorage.setItem(RAIL_WIDTH_KEY, String(next))
+      }
+    }
+    function onUp() {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [sidebarWidth, railWidth])
+
+  const shellStyle: CSSProperties = isNarrow
+    ? { gridTemplateColumns: `${sidebarWidth}px minmax(0,1fr)` }
+    : { gridTemplateColumns: `${sidebarWidth}px minmax(0,1fr) ${railOpen ? railWidth : 0}px` }
 
   const project = projects.find((item) => item.id === projectId) || null
 
@@ -226,7 +289,9 @@ export function Workspace() {
   }
 
   return (
-    <main className={`app-shell${railOpen ? '' : ' rail-collapsed'}`}>
+    <main className={`app-shell${railOpen ? '' : ' rail-collapsed'}`} style={shellStyle}>
+      {!isNarrow && <div className="resize-handle" style={{ left: sidebarWidth - 3 }} onMouseDown={startResize('sidebar')} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize"/>}
+      {!isNarrow && railOpen && <div className="resize-handle" style={{ right: railWidth - 3 }} onMouseDown={startResize('rail')} role="separator" aria-orientation="vertical" aria-label="Resize context panel" title="Drag to resize"/>}
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><Bot size={17}/></span><div><strong>InMyAI</strong><small>Local AI Workspace</small></div></div>
         <div className="project-picker">

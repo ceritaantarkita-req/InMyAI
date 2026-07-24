@@ -46,6 +46,10 @@ const navAdvanced: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: Workflow }
 ]
 
+// Persisted expanded/collapsed state of the Advanced nav group, so the user's
+// preference survives reloads. Module-scope because it's a stable string key.
+const ADVANCED_NAV_KEY = 'inmyai:nav:advancedExpanded'
+
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
@@ -87,7 +91,6 @@ export function Workspace() {
   const [notice, setNotice] = useState('')
 
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const ADVANCED_NAV_KEY = 'inmyai:nav:advancedExpanded'
 
   useEffect(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem(ADVANCED_NAV_KEY) : null

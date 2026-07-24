@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS index_progress (
 - Drive roots: `C:\`, `D:\`, `\`
 - OS dirs: `Windows`, `Program Files`, `Program Files (x86)`
 
-Detection = exact match OR is-a-parent-of (e.g. `C:\Users\Amand` matches profile root). Implemented with `Path.resolve()` and `parts` comparison — robust against trailing separators and `..`.
+Detection = exact match OR is-a-parent-of (e.g. `C:\Users\<name>` matches profile root). Implemented with `Path.resolve()` and `parts` comparison — robust against trailing separators and `..`.
 
 **Endpoint:** `GET /api/projects/scope?path=...` → returns the classification dict. Reuses allowed-roots resolution so it works inside Tauri and browser equally. Does NOT mutate anything.
 
@@ -120,7 +120,7 @@ In both registration flows (`SettingsModal.addProject`, `registerProjectFromExpl
 
 ### Edge cases
 - Path doesn't exist → existing `POST` validation handles (400).
-- Picker returns path inside allowed roots but dangerous (e.g. allowed `C:\Users\Amand`, picked `C:\Users\Amand`) → still flagged.
+- Picker returns path inside allowed roots but dangerous (e.g. allowed `C:\Users\<name>`, picked `C:\Users\<name>`) → still flagged.
 - Classification fails (permission) → treat as non-dangerous, let `POST` validation surface the real error.
 
 ### Tests

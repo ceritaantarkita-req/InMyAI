@@ -17,7 +17,7 @@ python -m pytest services/api/tests -q
 # frontend (from apps/web)
 cd apps/web && npx tsc --noEmit && npm run test && npm run build
 ```
-All repo-relative paths below are from `C:\Users\Amand\.gemini\antigravity\scratch\ideagentics\demo\InMyAI_FullStack`.
+All repo-relative paths below are from the repo root (`InMyAI_FullStack`).
 
 ---
 

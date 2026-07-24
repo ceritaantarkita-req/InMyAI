@@ -3,7 +3,7 @@
 #
 # Intended usage once this repo is pushed to a public GitHub repo:
 #
-#   irm https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/ceritaantarkita-req/InMyAI/main/install.ps1 | iex
 #
 # `irm` (Invoke-RestMethod) downloads this file's text, `iex`
 # (Invoke-Expression) runs it in the current PowerShell session - the same
@@ -21,8 +21,7 @@
 function Install-InMyAI {
     $ErrorActionPreference = 'Stop'
 
-    # TODO (Amanda): fill this in once the repo is pushed to GitHub.
-    $RepoUrl = 'https://github.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>.git'
+    $RepoUrl = 'https://github.com/ceritaantarkita-req/InMyAI.git'
     $InstallDir = Join-Path $HOME 'InMyAI'
 
     function Test-CommandExists([string]$Name) {

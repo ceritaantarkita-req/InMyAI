@@ -63,10 +63,10 @@ deliberately doesn't cover yet.
 
 ## One-command install — Windows
 
-Once this repo is pushed to GitHub (replace `<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>` in the command below with the real path), anyone with Git, Node.js, and Python already on their machine can set up and launch InMyAI with a single PowerShell command:
+Anyone with Git, Node.js, and Python already on their machine can set up and launch InMyAI with a single PowerShell command:
 
 ```powershell
-irm https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/ceritaantarkita-req/InMyAI/main/install.ps1 | iex
 ```
 
 This clones the repo into `%USERPROFILE%\InMyAI` (or updates it in place if it's already there), runs the same setup `npm run setup` does below, and starts `npm run dev` automatically. See `install.ps1` for exactly what it does — it's a plain, readable script, not an opaque binary.

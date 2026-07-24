@@ -109,7 +109,7 @@ inside it - exactly as designed. One real bug turned up at that point
 ## 5. Exact steps to try this on your machine
 
 ```powershell
-cd "C:\Users\Amand\.gemini\antigravity\scratch\ideagentics\demo\InMyAI_FullStack"
+cd "C:\path\to\InMyAI_FullStack"
 
 # 1. Rust toolchain (skip if `rustc --version` already works)
 winget install -e --id Rustlang.Rustup

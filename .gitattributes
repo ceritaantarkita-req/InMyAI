@@ -1,0 +1,39 @@
+# Normalize every text file to LF inside the repository and on checkout.
+# Without this, a Windows checkout stores CRLF in the working tree while the
+# index holds LF, which caused four concrete problems in this ecosystem:
+#   1. SHA256 release manifests could never verify on Windows.
+#   2. Formatters (gofmt) reported false positives on untouched files.
+#   3. Every "git add" printed dozens of LF/CRLF warnings, burying real ones.
+#   4. "git status" disagreed between Windows and WSL for the same checkout.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF: cmd.exe can mis-parse labels and
+# multi-line constructs in .bat/.cmd files that use bare LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touch these: Git must not rewrite bytes in binary files.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.svg text
+*.pdf binary
+*.zip binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.mp4 binary
+*.mov binary
+*.wav binary
+*.mp3 binary
+*.duckdb binary
+*.xlsx binary
+*.xls binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

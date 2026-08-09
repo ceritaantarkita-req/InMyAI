@@ -1,155 +1,136 @@
 # InMyAI QA Report
 
-Date: 2026-07-24 (updated after Phase 2's core-flow fixes; earlier updates from the Explorer + Terminal tabs, the v1/v2 merge, Agents Workspace panel, and config fix are folded in below; original visual pass is from 2026-07-21 and is called out explicitly where it has not been re-verified)
+Date: 2026-08-09
+Scope: Phase B1 terminal browser-boundary security refresh, with current CI baseline and explicit historical evidence boundaries.
 
-## Automated result (this session)
+## Current automated result
+
+The Phase B1 pull request was executed by GitHub Actions against the security change before merge.
 
 | Check | Result |
 |---|---|
-| Strict TypeScript (`tsc --noEmit`) | PASS |
-| Frontend tests (`node --test`) | 15/15 PASS |
-| FastAPI tests (`pytest services/api/tests`) | 134/134 PASS |
-| In-process API smoke check (`scripts/smoke_check.py`) | PASS — see `SMOKE_REPORT.json` |
-| Engine simulation x3 (`scripts/simulate_engine.py`) | PASS — see `docs/qa/ENGINE_SIMULATION_3X.json` |
-| Next.js production build (`next build`) | PASS — see note below |
-| Visual/screenshot regression | NOT RE-RUN — Playwright is not installed in this sandbox; the 2026-07-21 visual pass below has not been re-verified against the Agents/Explorer/Terminal/Phase-2-nav tabs |
-| Tauri desktop shell (`cargo tauri dev`) | PASS — confirmed on Windows: compiled clean, opened a real native window. Two bugs found and fixed on first runs (`allowedDevOrigins` in `next.config.mjs`, missing `capabilities/default.json`), see `docs/decisions/tauri-desktop-shell.md` sections 7–8 |
+| Strict TypeScript (`npm run typecheck:web`) | PASS |
+| Frontend tests (`npm run test:web`) | **20/20 PASS** |
+| FastAPI tests (`python -m pytest services/api/tests -q`) | **141 passed, 1 skipped** |
+| Next.js production build (`npm run build:web`) | PASS |
+| Phase B1 Terminal Origin regression coverage | PASS — included in backend suite |
+| Visual/screenshot regression | NOT RE-RUN in Phase B1 |
+| Live post-change Windows Tauri WebSocket Origin handshake | NOT RE-RUN in Phase B1 |
 
-`next build` was run against a copy of `apps/web` outside this sandbox's
-FUSE-mounted project folder (an `rsync` into `/tmp`, `node_modules` fetched
-fresh there): compiled and prerendered cleanly, including the fix for the
-SSR crash `@xterm/xterm` caused (see
-`docs/decisions/explorer-and-terminal.md`, section 7). Running it directly
-on the mounted folder in this sandbox hits an unrelated `Bus error` — a
-sandbox mmap artifact, not a code issue — so this workaround is what
-actually verifies the build, not a substitute for it. Your own machine's
-normal filesystem doesn't have this constraint; `npm run build` there
-should just work.
+The successful Phase B1 runtime was merged to `main` as:
 
-The 134 backend tests include everything from the original P0 build plus
-regression coverage added since: multi-agent task orchestration
-(`test_agent_runtime.py`), PPTX indexing (`test_office_indexing.py`),
-stale-write detection (`test_core.py`), the dependency-free `apps/local-ui`
-static mount (`test_local_ui.py`), the `INMYAI_*` env-prefix binding fix
-(`test_config.py`), the mind-map browse endpoint (`test_browse.py`, 8
-tests), the interactive terminal's `PtySession` (`test_terminal.py`, 5
-tests), the UI-managed allowed-roots settings (`test_allowed_roots.py`,
-8 tests), and Phase 2's core-flow fixes: background auto-indexing with a
-queryable status machine (`test_index_status.py`, 7 tests), the
-folder-scope guardrail (`test_folder_scope.py`, 9 tests), and the Graphify
-import HTTP endpoint (2 new tests appended to `test_import_graphify.py`).
-`test_git_tools.py` (9 tests, read-only git status/log/diff/branch/
-blame) is part of that 134 and passes cleanly on a normal filesystem; see
-the note in `docs/decisions/v1-v2-merge-and-agents-panel.md` if it fails
-specifically inside a FUSE-mounted sandbox directory — that is an
-environment artifact, not a code defect. Running all 134 as one command in
-this sandbox occasionally exceeds a 40-second budget purely from cumulative
-FUSE I/O (auto-indexing now runs on every project any test file creates,
-not just indexing-specific tests) — confirmed as slowness, not a hang, by
-running the same 134 tests split into three batches, all green in under a
-minute combined; see `docs/decisions/phase2-core-flow.md` section 6.
+`17cc6e772c38b3aac8b67818283cc55b203df31c`
 
-## What changed since the 2026-07-21 pass
+These counts supersede the older 2026-07 report values of 15 frontend tests and 134 backend tests.
 
-- Merged InMyAI v2's unique, real capabilities into this codebase: multi-agent
-  task orchestration (`agent_runtime.py`), stale-write detection + atomic
-  writes, PPTX indexing, and the dependency-free `apps/local-ui`.
-- Added an "Agents" tab to the Next.js Workspace (`AgentsView` in
-  `Workspace.tsx`).
-- Fixed the `INMYAI_*` environment-variable prefix so documented overrides
-  (`INMYAI_PROVIDER`, `INMYAI_ALLOWED_ROOTS`, etc.) actually bind.
-- InMyAI v2 itself has been retired — this repository is now the single
-  source of truth for the project.
-- Added an "Explorer" tab: a mind-map style folder/file browser
-  (`GET /api/browse`) that lets you look around anywhere on disk — names
-  only, no content — before deciding what to register as a project.
-- Added a "Terminal" tab: a real interactive shell (PowerShell on Windows,
-  your default shell on POSIX) over a WebSocket PTY relay
-  (`/ws/terminal`) — explicitly not sandboxed.
-- The app now has nine primary surfaces instead of five.
-- Fixed a real Terminal crash (`Cannot read properties of undefined
-  (reading 'dimensions')`) caused by a dev-mode React Strict Mode /
-  xterm.js dispose race, and a misleading "Add a local project to begin."
-  subtitle shown on the two tabs that don't need one.
-- Added a Settings UI (`GET/POST/DELETE /api/settings/allowed-roots`) to
-  manage allowed project folders without editing `.env` or restarting -
-  including a one-click "Allow this folder & retry" fix inline in the
-  registration error itself, plus an inline in-browser folder picker.
-- Started a Tauri desktop shell (`apps/web/src-tauri`, `npm run
-  desktop:dev`): dev-mode native window + a real OS folder picker, wired
-  into Settings and Explorer. Production installer packaging is a
-  follow-up (see `docs/decisions/tauri-desktop-shell.md`).
-- Phase 2 core-flow fixes: new projects now auto-index in the background
-  with a visible progress banner instead of silently requiring a manual
-  click; a folder-scope guardrail warns before registering a system/
-  profile/drive-root folder; Explorer can overlay a project's code
-  relations (the same data Graph shows) directly on its radial browser,
-  and Graph gained a real Graphify `graph.json` import button; the 9-tab
-  sidebar is now a 5-item Main group plus a collapsible Advanced group
-  (Memory/Studio/Git/Agents), persisted per-user in `localStorage`. See
-  `docs/decisions/phase2-core-flow.md`.
+## Phase B1 security closure
 
-Full rationale for each decision: `docs/decisions/v1-v2-merge-and-agents-panel.md`,
-`docs/decisions/explorer-and-terminal.md`, `docs/decisions/allowed-roots-ui.md`,
-`docs/decisions/tauri-desktop-shell.md`, and `docs/decisions/phase2-core-flow.md`.
+### Finding
 
-## Smoke workflow
+The Terminal is a genuine PTY-backed local shell. The previous `/ws/terminal` flow accepted a WebSocket without first validating the browser's `Origin`. Because WebSockets are not protected by ordinary HTTP CORS middleware, a malicious web page could attempt Cross-Site WebSocket Hijacking against the local shell endpoint.
 
-See `SMOKE_REPORT.json`, regenerated by `scripts/smoke_check.py` against the
-bundled `examples/synthetic-project`: health, hardware, project registration,
-incremental indexing, FTS search, Safe Mock chat with citations,
-model-runtime status, and the full agent task pipeline (`agents` list,
-`POST /api/tasks`, `POST /api/tasks/{id}/run`) through to a `completed`
-checkpoint. Explorer's `GET /api/browse` and the Terminal's `/ws/terminal`
-PTY relay are covered by their own dedicated test files
-(`test_browse.py`, `test_terminal.py`) rather than the smoke script, since
-one browses the live sandbox filesystem and the other spawns a real shell
-process — see `docs/decisions/explorer-and-terminal.md` for why.
+### Implemented control
 
-## Visual verification (2026-07-21, not re-verified this session)
+`services/api/app/terminal.py` now validates the WebSocket Origin before `websocket.accept()` and before `PtySession` is constructed.
 
-Reference concept:
+Accepted exact origins:
 
-- `docs/reference/inmyai-usage-concept.png`
+- `http://127.0.0.1:3000`
+- `http://localhost:3000`
+- `http://tauri.localhost`
+- `https://tauri.localhost`
+- `tauri://localhost`
 
-Rendered evidence from the original pass:
+Missing or untrusted origins fail closed with WebSocket policy-violation code `1008`.
 
-- `docs/qa/workspace-desktop.png` — 1536×1024
-- `docs/qa/workspace-mobile.png` — 390×844
+Private-LAN browser origins are intentionally rejected for the Terminal even though ordinary InMyAI HTTP development may support a broader LAN CORS policy. The real-shell boundary is deliberately stricter.
 
-These screenshots predate the Agents tab and the mobile nav going from six to
-seven items, so they no longer reflect the current UI exactly. Re-running a
-visual pass needs Playwright + a Chromium binary, neither of which is
-installable in this sandbox (no network access). Recommendation: open the
-Workspace locally (`npm run dev`) and eyeball the new Agents tab and the
-7-column mobile bottom nav before relying on this section again.
+### Regression tests
 
-Chromium in the *original* build environment blocked navigation to all
-localhost, private-IP, and `file://` URLs with `ERR_BLOCKED_BY_ADMINISTRATOR`,
-so that pass verified live HTTP behavior through API smoke calls and direct
-HTTP response checks, ran Playwright Chromium under Xvfb, and rendered the
-production CSS and representative DOM via `page.set_content` for the
-screenshot comparison above.
+`services/api/tests/test_terminal_security.py` verifies that:
 
-## Five visual comparison points (historical, from the 2026-07-21 pass)
+- trusted loopback/Tauri origins are allowed;
+- missing Origin is rejected;
+- public malicious origins are rejected;
+- localhost/lookalike values are rejected;
+- private-LAN origins are rejected;
+- rejected handshakes close with code `1008`;
+- an untrusted connection returns before a PTY process can be spawned.
 
-1. **App skeleton:** left project navigation, central workspace, right context rail retained.
-2. **Palette:** true white surfaces, quiet gray background, compact dark typography, restrained blue selection state retained.
-3. **Chat anatomy:** assistant/user messages, context explanation, source chips, and bottom composer retained.
-4. **Safety visibility:** controlled file tools, model/runtime status, RAM profile, and one-engine policy are visible.
-5. **Responsive behavior:** desktop sidebars collapse into a mobile bottom navigation (now nine items, one per surface) without horizontal overflow — not re-verified visually this session, but the CSS grid was updated to match.
+The pre-existing `test_terminal.py` continues to cover direct PTY behavior.
 
-## Above-the-fold copy diff
+Full rationale: `docs/decisions/phase-b1-terminal-security.md`.
 
-No unapproved marketing hero, decorative eyebrow, fake metric, or capability claim was added. The implementation uses product-native workspace copy; the new Agents tab copy follows the same convention (plain description of what the Coordinator/Researcher/Worker/Verifier pipeline does, no unverifiable claims).
+## Assurance boundary
 
-## Intentional deviations
+The browser-origin CSWSH finding is **CLOSED at E3** for the intended local browser/Tauri boundary:
 
-- The original concept contained seven sidebar utilities; the shipped implementation consolidated them into five primary surfaces (Search embedded in Files/Graph, Tasks contextual, Settings a modal). Agents is now a sixth *added* surface on top of that baseline (not from the original concept) — a first-class tab, because task checkpoints benefit from a persistent, revisitable view rather than a modal.
-- The concept depicts a finished AI image. Core P0 instead labels the generated preview as a simulator. Real AI generation requires a user-configured local ComfyUI or optional Diffusers model.
-- Real Ollama response quality and GPU/VRAM benchmarks were not tested because no local model weights/runtime were available in the build environment.
-- Dockerfiles were reviewed but not container-built because Docker is unavailable in the build environment.
+- the exact source path was inspected;
+- focused security regression tests were added;
+- the complete backend suite passed in CI;
+- frontend tests/typecheck passed;
+- the production Next.js build passed.
+
+Phase B1 did **not** perform a fresh live Windows test proving the updated Tauri Origin handshake through a real PTY session. InMyAI previously had a successful Windows Tauri desktop-shell run, but that historical evidence predates this Origin check. A fresh Windows runtime check is required before upgrading the Phase B1-specific evidence to E4 on Windows.
+
+The Terminal also remains intentionally unsandboxed after a trusted connection is established. Phase B1 closes the browser-origin entry weakness; it does not convert the real shell into a restricted command environment.
+
+## Current automated coverage context
+
+The backend suite now includes the prior core coverage plus the Phase B1 security regression. Existing areas include:
+
+- project registration and allowed-root enforcement;
+- isolated test runtime/state;
+- file indexing and search;
+- DOCX/XLSX/PPTX parsing;
+- AST/code-relation extraction;
+- Git read-only inspection;
+- model routing and Ollama onboarding;
+- OCR/local-tool dispatch;
+- multi-agent task runtime;
+- stale-write detection and atomic writes;
+- Explorer browse policy;
+- direct PTY behavior;
+- **Terminal WebSocket Origin authorization**;
+- allowed-root UI APIs;
+- background indexing and folder-scope guardrails;
+- Graphify import.
+
+Frontend CI currently reports 20 passing tests covering the shipped web helpers/navigation behavior included in the repository test command.
+
+## Historical smoke, simulation, desktop, and visual evidence
+
+The Phase B1 PR intentionally changed only the Terminal WebSocket authorization boundary and its tests. It did not regenerate every earlier product artifact.
+
+### Existing smoke / engine evidence
+
+The repository already contains prior smoke and engine-simulation evidence from the earlier InMyAI build phases, including `SMOKE_REPORT.json` and `docs/qa/ENGINE_SIMULATION_3X.json`. Those remain historical evidence for the broader application and were **not newly rerun as part of the Phase B1 GitHub Actions job**.
+
+Do not interpret Phase B1's green CI as a new three-round whole-product simulation result. The current Phase B requirement for simulation 3× was executed on InMyHub, whose security runtime was materially changed in B2.
+
+### Tauri desktop shell
+
+A previous real Windows run confirmed that the Tauri shell compiled and opened successfully after fixes for `allowedDevOrigins` and Tauri capability permissions. See `docs/decisions/tauri-desktop-shell.md`.
+
+That proves historical desktop-shell viability, not the newly introduced Phase B1 Origin policy. Re-run the Terminal once on the target Windows laptop before claiming fresh Windows E4 for this security patch.
+
+### Visual verification
+
+The last recorded screenshots remain the historical 2026-07 visual evidence in `docs/qa/`. They predate several later workspace changes and were not regenerated in Phase B1. Phase B1 has no intended UI layout change, but this report does not silently promote old screenshots into current visual verification.
+
+## Recommended release checks after Phase B1
+
+Before a user-facing Windows release:
+
+1. Start the normal InMyAI desktop/Tauri development or release path.
+2. Open Terminal and confirm a real PowerShell session connects successfully.
+3. Run a harmless command and resize the terminal.
+4. Confirm ordinary loopback browser mode still connects.
+5. Confirm a browser page from a non-approved/LAN origin cannot establish the Terminal WebSocket.
+6. Re-run the repository's full CI/local QA commands after any further source change.
 
 ## Conclusion
 
-Core source, persistence, retrieval, routing, controlled local file workflow, OCR, Safe Mock orchestration, multi-agent task orchestration, the mind-map Explorer, the interactive Terminal, and the Phase 2 core-flow fixes (auto-indexing, folder-scope guardrail, Explorer+Graph relations overlay, Main/Advanced nav split) all pass their automated tests (134 backend + 15 frontend + a live in-process smoke check + a real `next build`). A fresh visual/screenshot pass could not be re-run in this sandbox (no Playwright) and should be run once on a normal machine before treating the UI as fully re-verified end to end — and the Terminal's actual shell behavior (PowerShell on Windows specifically) needs a live check on your machine per `docs/decisions/explorer-and-terminal.md` section 5, since a real shell process can't be meaningfully exercised end-to-end inside this sandbox. Absolute freedom from bugs across every Windows driver, Ollama model, ComfyUI workflow, and private repository cannot be guaranteed; provider-specific acceptance testing remains required.
+Phase B1 successfully closes the previously open browser-origin Terminal finding without weakening the product decision that Terminal is a real local shell. The code is merged, the security regression is in the permanent suite, and GitHub CI passed the current backend/frontend/build gates.
+
+The remaining verification gap is narrow and explicit: a fresh post-change real Windows/Tauri terminal connection should be run before Phase B1 is represented as E4 on Windows. No broader remote/multi-user terminal capability was introduced.

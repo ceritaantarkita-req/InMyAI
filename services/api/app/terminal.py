@@ -16,11 +16,13 @@ Because browsers are allowed to open WebSockets across origins, localhost by
 itself is not a security boundary: a malicious public page could otherwise
 open `/ws/terminal` and type into the user's real shell (Cross-Site WebSocket
 Hijacking). The PTY boundary therefore validates the browser-supplied Origin
-header *before* accepting the WebSocket or spawning a shell. Only InMyAI's
-known local web origins, the production Tauri origins, and the same private-
-LAN :3000 origins supported by the app's HTTP CORS policy are accepted.
-Missing or untrusted origins fail closed. Non-browser local programs already
-run with the user's OS authority and are not an additional privilege boundary.
+header *before* accepting the WebSocket or spawning a shell. The real-shell
+surface is intentionally stricter than the ordinary HTTP CORS policy: only
+InMyAI's loopback web origins and production Tauri origins are accepted.
+Private-LAN browser origins are rejected even though some non-terminal HTTP
+features support LAN development. Missing or untrusted origins fail closed.
+Non-browser local programs already run with the user's OS authority and are
+not an additional privilege boundary.
 
 On Windows, this module requires `pywinpty` (see requirements.txt - it is
 platform-gated so `pip install -r requirements.txt` does not fail on
@@ -35,7 +37,6 @@ import asyncio
 import json
 import os
 import platform
-import re
 from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -48,10 +49,10 @@ except ImportError:
     winpty = None  # type: ignore
 
 
-# Keep this aligned with main.py's browser origins. Production Tauri v2 uses
-# http://tauri.localhost on Windows by default and tauri://localhost on the
-# custom-protocol platforms. Exact matching is intentional: do not loosen
-# this to substring/suffix checks, which would recreate the CSWSH boundary.
+# Production Tauri v2 uses http://tauri.localhost on Windows by default and
+# tauri://localhost on custom-protocol platforms. Exact matching is
+# intentional: do not loosen this to suffix checks or the broader private-LAN
+# CORS regex from main.py; either would recreate the CSWSH boundary.
 _TERMINAL_ALLOWED_ORIGINS = frozenset({
     'http://127.0.0.1:3000',
     'http://localhost:3000',
@@ -59,9 +60,6 @@ _TERMINAL_ALLOWED_ORIGINS = frozenset({
     'https://tauri.localhost',
     'tauri://localhost',
 })
-_TERMINAL_PRIVATE_LAN_ORIGIN = re.compile(
-    r'^http://(?:10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):3000$'
-)
 
 
 def is_terminal_origin_allowed(origin: str | None) -> bool:
@@ -71,9 +69,7 @@ def is_terminal_origin_allowed(origin: str | None) -> bool:
     must live on the WebSocket path itself. Missing Origin fails closed; the
     browser clients used by InMyAI always send one.
     """
-    if not origin:
-        return False
-    return origin in _TERMINAL_ALLOWED_ORIGINS or bool(_TERMINAL_PRIVATE_LAN_ORIGIN.fullmatch(origin))
+    return bool(origin and origin in _TERMINAL_ALLOWED_ORIGINS)
 
 
 async def authorize_terminal_websocket(websocket: WebSocket) -> bool:

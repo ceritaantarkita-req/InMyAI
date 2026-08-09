@@ -10,8 +10,17 @@ This is intentionally NOT sandboxed: whatever your OS user account can do,
 a command typed here can do. That is an accepted tradeoff, the same as
 opening any other terminal window on your own machine - InMyAI already runs
 entirely locally under your own account with no multi-tenant boundary to
-protect. It is reached over a local WebSocket (`/ws/terminal`), not exposed
-publicly by anything in this app.
+protect.
+
+Because browsers are allowed to open WebSockets across origins, localhost by
+itself is not a security boundary: a malicious public page could otherwise
+open `/ws/terminal` and type into the user's real shell (Cross-Site WebSocket
+Hijacking). The PTY boundary therefore validates the browser-supplied Origin
+header *before* accepting the WebSocket or spawning a shell. Only InMyAI's
+known local web origins, the production Tauri origins, and the same private-
+LAN :3000 origins supported by the app's HTTP CORS policy are accepted.
+Missing or untrusted origins fail closed. Non-browser local programs already
+run with the user's OS authority and are not an additional privilege boundary.
 
 On Windows, this module requires `pywinpty` (see requirements.txt - it is
 platform-gated so `pip install -r requirements.txt` does not fail on
@@ -26,6 +35,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -36,6 +46,43 @@ try:
     import winpty  # type: ignore
 except ImportError:
     winpty = None  # type: ignore
+
+
+# Keep this aligned with main.py's browser origins. Production Tauri v2 uses
+# http://tauri.localhost on Windows by default and tauri://localhost on the
+# custom-protocol platforms. Exact matching is intentional: do not loosen
+# this to substring/suffix checks, which would recreate the CSWSH boundary.
+_TERMINAL_ALLOWED_ORIGINS = frozenset({
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'http://tauri.localhost',
+    'https://tauri.localhost',
+    'tauri://localhost',
+})
+_TERMINAL_PRIVATE_LAN_ORIGIN = re.compile(
+    r'^http://(?:10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):3000$'
+)
+
+
+def is_terminal_origin_allowed(origin: str | None) -> bool:
+    """Return True only for origins allowed to control the real local PTY.
+
+    WebSocket handshakes are not governed by CORSMiddleware, so this check
+    must live on the WebSocket path itself. Missing Origin fails closed; the
+    browser clients used by InMyAI always send one.
+    """
+    if not origin:
+        return False
+    return origin in _TERMINAL_ALLOWED_ORIGINS or bool(_TERMINAL_PRIVATE_LAN_ORIGIN.fullmatch(origin))
+
+
+async def authorize_terminal_websocket(websocket: WebSocket) -> bool:
+    """Reject cross-origin terminal handshakes before accept()/PTY spawn."""
+    origin = websocket.headers.get('origin')
+    if is_terminal_origin_allowed(origin):
+        return True
+    await websocket.close(code=1008, reason='Untrusted terminal WebSocket origin.')
+    return False
 
 
 class PtySession:
@@ -133,12 +180,16 @@ class PtySession:
 
 
 async def run_terminal_session(websocket: WebSocket, cwd: str, shell: Optional[str] = None) -> None:
-    """Own a WebSocket's full lifecycle for one terminal session: accept,
-    spawn the PTY, relay bytes in both directions until either side hangs
-    up, then clean up. Keystrokes and resize events arrive as JSON text
-    frames (see the frontend's xterm.js glue); shell output is sent back as
-    raw binary frames for xterm.js to write directly.
+    """Own a WebSocket's full lifecycle for one terminal session.
+
+    The Origin gate executes before accept() and before a PTY process exists.
+    Once authorized, keystrokes and resize events arrive as JSON text frames
+    (see the frontend's xterm.js glue); shell output is sent back as raw
+    binary frames for xterm.js to write directly.
     """
+    if not await authorize_terminal_websocket(websocket):
+        return
+
     await websocket.accept()
     loop = asyncio.get_event_loop()
     try:

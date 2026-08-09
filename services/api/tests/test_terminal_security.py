@@ -25,20 +25,20 @@ def test_terminal_origin_allows_supported_inmyai_clients() -> None:
     assert terminal_module.is_terminal_origin_allowed('http://127.0.0.1:3000')
     assert terminal_module.is_terminal_origin_allowed('http://localhost:3000')
     assert terminal_module.is_terminal_origin_allowed('http://tauri.localhost')
+    assert terminal_module.is_terminal_origin_allowed('https://tauri.localhost')
     assert terminal_module.is_terminal_origin_allowed('tauri://localhost')
-    assert terminal_module.is_terminal_origin_allowed('http://192.168.1.25:3000')
-    assert terminal_module.is_terminal_origin_allowed('http://10.12.3.4:3000')
-    assert terminal_module.is_terminal_origin_allowed('http://172.31.5.9:3000')
 
 
-def test_terminal_origin_rejects_cross_site_and_lookalikes() -> None:
+def test_terminal_origin_rejects_cross_site_lan_and_lookalikes() -> None:
     assert not terminal_module.is_terminal_origin_allowed(None)
     assert not terminal_module.is_terminal_origin_allowed('')
     assert not terminal_module.is_terminal_origin_allowed('https://evil.example')
     assert not terminal_module.is_terminal_origin_allowed('http://localhost:3000.evil.example')
     assert not terminal_module.is_terminal_origin_allowed('http://192.168.1.25.evil.example:3000')
-    assert not terminal_module.is_terminal_origin_allowed('http://192.168.1.25:3001')
-    assert not terminal_module.is_terminal_origin_allowed('https://192.168.1.25:3000')
+    assert not terminal_module.is_terminal_origin_allowed('http://192.168.1.25:3000')
+    assert not terminal_module.is_terminal_origin_allowed('http://10.12.3.4:3000')
+    assert not terminal_module.is_terminal_origin_allowed('http://172.31.5.9:3000')
+    assert not terminal_module.is_terminal_origin_allowed('http://127.0.0.1:3001')
     assert not terminal_module.is_terminal_origin_allowed('null')
 
 

@@ -8,7 +8,7 @@
   "source": {
     "repository": "ceritaantarkita-req/InMyAI",
     "defaultBranch": "main",
-    "codeCommit": "17cc6e772c38b3aac8b67818283cc55b203df31c",
+    "codeCommit": "0aac6fbd1acbb29c56af14078528154872b20255",
     "manifestPath": "inmy.manifest.json"
   },
   "lifecycle": "standalone-ready",
@@ -24,9 +24,10 @@
       "success": "http-2xx"
     },
     "notes": [
-      "Primary API runtime uses Python/FastAPI on 127.0.0.1:8000.",
+      "Primary API runtime uses Python/FastAPI on 127.0.0.1:8000 in the standard development launcher.",
       "The Next.js web client normally uses port 3000.",
       "The desktop path uses a Tauri shell around the web client.",
+      "The Docker image may listen on 0.0.0.0 inside its container namespace; local-first host publishing must remain loopback-scoped.",
       "A later coexistence phase should replace hard-coded development ports with the ecosystem port contract where safe."
     ]
   },
@@ -41,7 +42,7 @@
       "status": "partial",
       "uiMode": "native-shell",
       "executionMode": "local",
-      "limitations": ["Tauri previously ran successfully on Windows, but the Phase B1 terminal-Origin change still needs fresh Windows/Tauri E4 verification."]
+      "limitations": ["Tauri previously ran successfully on Windows, but the Phase B1/C2 authority changes still need fresh Windows/Tauri E4 verification."]
     },
     "macos": {
       "status": "unverified",
@@ -90,12 +91,17 @@
       "Atomic/stale-write protection for controlled writes",
       "Terminal WebSocket exact-Origin authorization before accept/PTY spawn",
       "Terminal rejects missing/public/lookalike/private-LAN browser origins",
+      "HTTP LocalAuthorityMiddleware rejects non-loopback Host authorities before FastAPI routes",
+      "HTTP browser origins are exact allowlisted for loopback/Tauri clients; private-LAN browser CORS is not accepted",
+      "The discovery health response is minimal and no longer exposes the database filesystem path",
+      "Raw GET /api/inmy/manifest is served behind the HTTP authority boundary",
       "Terminal remains visibly documented as an unsandboxed real OS-user shell"
     ],
     "knownOpenFindings": [
-      "Fresh post-Phase-B1 Windows/Tauri terminal handshake is still required for E4.",
+      "Fresh post-Phase-B1/C2 Windows/Tauri authority handshake is still required for E4.",
       "Ecosystem identity/delegation/approval receipts are not yet implemented.",
-      "The real Terminal is intentionally unsandboxed after an approved local client connects."
+      "The real Terminal is intentionally unsandboxed after an approved local client connects.",
+      "Docker host-port publishing must remain loopback-scoped for local-first deployments."
     ]
   },
   "performance": {
@@ -175,7 +181,7 @@
       "inputSchemaRef": null,
       "outputSchemaRef": null,
       "dataEgress": [],
-      "notes": ["Search/index capability is local and project-scoped."]
+      "notes": ["Search/index capability is local and project-scoped; Hub discovery may expose this metadata as R0 read-only, not execute project mutations."]
     },
     {
       "id": "ai.ocr.read",
@@ -225,20 +231,22 @@
   ],
   "evidence": {
     "level": "E3",
-    "verifiedAt": "2026-08-09T04:36:10Z",
+    "verifiedAt": "2026-08-09T09:21:28Z",
     "automated": [
       "Phase B1 GitHub CI: TypeScript PASS.",
       "Phase B1 GitHub CI: frontend 20/20 PASS.",
       "Phase B1 GitHub CI: backend 141 passed, 1 skipped.",
       "Phase B1 GitHub CI: Next.js production build PASS.",
-      "Terminal Origin authorization regression included in backend suite."
+      "Terminal Origin authorization regression included in backend suite.",
+      "Phase C2 focused HTTP authority harness: 3 independent rounds, 5/5 PASS each round.",
+      "Phase C2 GitHub CI run #14: typecheck:web, web tests, full backend pytest suite, and production web build all PASS."
     ],
     "manual": [
-      "Historical Tauri Windows desktop-shell run succeeded before the Phase B1 Origin change."
+      "Historical Tauri Windows desktop-shell run succeeded before the Phase B1/C2 authority changes."
     ],
     "platformEvidence": {
       "web": "automated",
-      "windows": "manual-runtime",
+      "windows": "manual-runtime-stale",
       "macos": "none",
       "linux": "automated",
       "android": "none",
@@ -248,7 +256,7 @@
   "limitations": [
     "Current Android/iOS client path is not implemented.",
     "Cross-platform performance budgets are not yet measured.",
-    "Fresh Windows/Tauri E4 must be rerun after Phase B1 before the new Terminal boundary is called Windows-verified.",
+    "Fresh Windows/Tauri E4 must be rerun after Phase B1/C2 before the new authority boundaries are called Windows-verified.",
     "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist."
   ]
 }

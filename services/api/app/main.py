@@ -14,6 +14,8 @@ from .config import settings
 from .database import connect, migrate, transaction, utc_now
 from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
+from .inmy_manifest import load_inmy_manifest
+from .local_security import ALLOWED_HTTP_ORIGINS, LocalAuthorityMiddleware
 from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_install_state, get_ollama_status
 from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
@@ -51,12 +53,12 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title='InMyAI Local API', version='0.1.0', lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://127.0.0.1:3000', 'http://localhost:3000'],
-    allow_origin_regex=r'^http://(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):3000$',
+    allow_origins=sorted(ALLOWED_HTTP_ORIGINS),
     allow_credentials=False,
     allow_methods=['*'],
     allow_headers=['*']
 )
+app.add_middleware(LocalAuthorityMiddleware)
 
 # Dependency-free static UI (plain HTML/JS/CSS, no Node/npm required) served
 # straight from the API process. Optional: only mounted if the directory
@@ -69,7 +71,18 @@ if _local_ui.exists():
 
 @app.get('/api/health')
 def health() -> dict:
-    return {'ok': True, 'app': 'InMyAI', 'version': '0.1.0', 'database': str(settings.database_path)}
+    return {
+        'ok': True,
+        'app': 'InMyAI',
+        'version': '0.1.0',
+        'mode': 'local-first',
+        'status': 'healthy',
+    }
+
+
+@app.get('/api/inmy/manifest')
+def inmy_manifest() -> dict:
+    return load_inmy_manifest()
 
 
 @app.get('/api/hardware')
@@ -681,4 +694,3 @@ def cancel_task(task_id: int) -> dict:
         return agent_runtime.cancel_task(task_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-

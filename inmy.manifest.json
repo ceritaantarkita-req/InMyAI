@@ -1,0 +1,254 @@
+{
+  "schemaVersion": "1.0.0",
+  "canonicalId": "inmyai",
+  "name": "InMyAI",
+  "productVersion": "0.1.0",
+  "ownerRef": "governance:ceo",
+  "dataOwnerRef": "governance:ceo",
+  "source": {
+    "repository": "ceritaantarkita-req/InMyAI",
+    "defaultBranch": "main",
+    "codeCommit": "17cc6e772c38b3aac8b67818283cc55b203df31c",
+    "manifestPath": "inmy.manifest.json"
+  },
+  "lifecycle": "standalone-ready",
+  "runtime": {
+    "kind": "hybrid",
+    "command": "npm run dev",
+    "hostPolicy": "loopback-only",
+    "port": 8000,
+    "portEnv": null,
+    "health": {
+      "method": "GET",
+      "path": "/api/health",
+      "success": "http-2xx"
+    },
+    "notes": [
+      "Primary API runtime uses Python/FastAPI on 127.0.0.1:8000.",
+      "The Next.js web client normally uses port 3000.",
+      "The desktop path uses a Tauri shell around the web client.",
+      "A later coexistence phase should replace hard-coded development ports with the ecosystem port contract where safe."
+    ]
+  },
+  "platforms": {
+    "web": {
+      "status": "full",
+      "uiMode": "browser",
+      "executionMode": "local",
+      "limitations": ["Some privileged local capabilities depend on the host API and cannot be treated as a generic public web service."]
+    },
+    "windows": {
+      "status": "partial",
+      "uiMode": "native-shell",
+      "executionMode": "local",
+      "limitations": ["Tauri previously ran successfully on Windows, but the Phase B1 terminal-Origin change still needs fresh Windows/Tauri E4 verification."]
+    },
+    "macos": {
+      "status": "unverified",
+      "uiMode": "native-shell",
+      "executionMode": "local",
+      "limitations": ["Source architecture has POSIX PTY support, but current macOS packaging/runtime evidence is not recorded."]
+    },
+    "linux": {
+      "status": "partial",
+      "uiMode": "browser",
+      "executionMode": "local",
+      "limitations": ["Linux CI exercises the source/runtime stack, but desktop-shell release acceptance is not recorded."]
+    },
+    "android": {
+      "status": "unsupported",
+      "uiMode": "none",
+      "executionMode": "none",
+      "limitations": ["Current product is a local desktop/web workspace; phone support should be introduced later as an authenticated control-only/provider-delegated client, not as a full local shell/filesystem runtime."]
+    },
+    "ios": {
+      "status": "unsupported",
+      "uiMode": "none",
+      "executionMode": "none",
+      "limitations": ["Current product is a local desktop/web workspace; phone support should be introduced later as an authenticated control-only/provider-delegated client, not as a full local shell/filesystem runtime."]
+    }
+  },
+  "security": {
+    "defaultRiskClass": "R2",
+    "exposure": "loopback-only",
+    "sandboxed": false,
+    "permissions": [
+      "project.read",
+      "project.index",
+      "project.file.write-controlled",
+      "agent.execute-controlled",
+      "terminal.execute-local"
+    ],
+    "secrets": [
+      "provider API keys are BYOK/config references only",
+      "local model/provider configuration"
+    ],
+    "approvalPolicy": "capability-specific",
+    "controls": [
+      "Allowed-root policy for project content operations",
+      "Sensitive-path blocklist",
+      "Atomic/stale-write protection for controlled writes",
+      "Terminal WebSocket exact-Origin authorization before accept/PTY spawn",
+      "Terminal rejects missing/public/lookalike/private-LAN browser origins",
+      "Terminal remains visibly documented as an unsandboxed real OS-user shell"
+    ],
+    "knownOpenFindings": [
+      "Fresh post-Phase-B1 Windows/Tauri terminal handshake is still required for E4.",
+      "Ecosystem identity/delegation/approval receipts are not yet implemented.",
+      "The real Terminal is intentionally unsandboxed after an approved local client connects."
+    ]
+  },
+  "performance": {
+    "measurementStatus": "unmeasured",
+    "budgets": {
+      "startupMs": null,
+      "memoryMb": null,
+      "initialTransferKb": null,
+      "localApiP95Ms": null,
+      "maxConcurrency": null,
+      "queueDepth": null,
+      "operationTimeoutMs": null
+    },
+    "resourceControls": [
+      "Background indexing exposes status instead of blocking the primary UI flow.",
+      "Blocking PTY reads are moved off the asyncio event loop.",
+      "Terminal cleanup terminates the PTY process when the session closes.",
+      "Provider/model execution is optional and must fail visibly when unavailable."
+    ],
+    "knownBottlenecks": [
+      "Formal startup, memory, bundle and representative API p95 budgets have not yet been measured.",
+      "Local model/OCR/indexing workloads can be materially heavier than the web shell and must be measured separately from optional provider/model memory."
+    ]
+  },
+  "mobile": {
+    "readiness": "unverified",
+    "touchOptimized": "unverified",
+    "safeAreaAware": "unverified",
+    "keyboardAware": "unverified",
+    "responsiveNavigation": "partial",
+    "offlineMode": "unverified",
+    "backgroundExecution": "provider-delegated",
+    "testedViewports": [],
+    "limitations": [
+      "Historical mobile screenshots predate later workspace changes and are not accepted as current mobile verification.",
+      "A phone client must not expose or emulate unrestricted desktop Terminal/filesystem authority.",
+      "Heavy indexing/model/tool work should execute on a trusted desktop/provider and stream status/results to mobile."
+    ]
+  },
+  "data": {
+    "policy": "local-only",
+    "persistence": [
+      "Local project metadata/indexes",
+      "Local chat/memory/task state",
+      "User-selected project files through controlled tooling"
+    ],
+    "backup": "not-defined",
+    "crossProductDatabaseAccess": false,
+    "retention": ["Product-specific local persistence; formal ecosystem backup/retention policy is still future work."]
+  },
+  "dependencies": {
+    "runtimeThirdPartyCount": null,
+    "externalExecutables": [
+      "Node.js",
+      "Python",
+      "Tesseract OCR when OCR is used",
+      "pywinpty on Windows for Terminal"
+    ],
+    "providers": [
+      "Ollama optional",
+      "ComfyUI/Diffusers optional",
+      "BYOK provider adapters optional"
+    ],
+    "dependencyPolicy": "review-required"
+  },
+  "capabilities": [
+    {
+      "id": "ai.project.search",
+      "version": "1.0.0",
+      "riskClass": "R0",
+      "mode": "read",
+      "platforms": ["web", "windows", "linux"],
+      "sideEffects": [],
+      "approvalRequired": false,
+      "idempotency": "not-applicable",
+      "timeoutMs": null,
+      "inputSchemaRef": null,
+      "outputSchemaRef": null,
+      "dataEgress": [],
+      "notes": ["Search/index capability is local and project-scoped."]
+    },
+    {
+      "id": "ai.ocr.read",
+      "version": "1.0.0",
+      "riskClass": "R1",
+      "mode": "read",
+      "platforms": ["web", "windows", "linux"],
+      "sideEffects": ["Temporary/local processing may occur"],
+      "approvalRequired": false,
+      "idempotency": "supported",
+      "timeoutMs": null,
+      "inputSchemaRef": null,
+      "outputSchemaRef": null,
+      "dataEgress": [],
+      "notes": ["Local OCR path; provider OCR is not implied."]
+    },
+    {
+      "id": "ai.agent.task.run",
+      "version": "1.0.0",
+      "riskClass": "R2",
+      "mode": "execute",
+      "platforms": ["web", "windows", "linux"],
+      "sideEffects": ["Task execution may create controlled local artifacts or controlled writes depending on the selected tools."],
+      "approvalRequired": true,
+      "idempotency": "not-yet-supported",
+      "timeoutMs": null,
+      "inputSchemaRef": null,
+      "outputSchemaRef": null,
+      "dataEgress": [],
+      "notes": ["Hub integration must define exact tool permissions, idempotency and execution receipts before write-integrated status."]
+    },
+    {
+      "id": "ai.terminal.execute",
+      "version": "1.0.0",
+      "riskClass": "R3",
+      "mode": "execute",
+      "platforms": ["web", "windows", "linux"],
+      "sideEffects": ["Arbitrary commands under the current OS user can read/write/delete files, start processes or access user-authorized network resources."],
+      "approvalRequired": true,
+      "idempotency": "not-applicable",
+      "timeoutMs": null,
+      "inputSchemaRef": null,
+      "outputSchemaRef": null,
+      "dataEgress": ["Depends on the command entered/executed by the user; unrestricted local shell network behavior is possible."],
+      "notes": ["This capability must never be selected as a silent fallback by InMyHub or an agent.", "Current UI Terminal is intentionally interactive and unsandboxed after trusted Origin authorization."]
+    }
+  ],
+  "evidence": {
+    "level": "E3",
+    "verifiedAt": "2026-08-09T04:36:10Z",
+    "automated": [
+      "Phase B1 GitHub CI: TypeScript PASS.",
+      "Phase B1 GitHub CI: frontend 20/20 PASS.",
+      "Phase B1 GitHub CI: backend 141 passed, 1 skipped.",
+      "Phase B1 GitHub CI: Next.js production build PASS.",
+      "Terminal Origin authorization regression included in backend suite."
+    ],
+    "manual": [
+      "Historical Tauri Windows desktop-shell run succeeded before the Phase B1 Origin change."
+    ],
+    "platformEvidence": {
+      "web": "automated",
+      "windows": "manual-runtime",
+      "macos": "none",
+      "linux": "automated",
+      "android": "none",
+      "ios": "none"
+    }
+  },
+  "limitations": [
+    "Current Android/iOS client path is not implemented.",
+    "Cross-platform performance budgets are not yet measured.",
+    "Fresh Windows/Tauri E4 must be rerun after Phase B1 before the new Terminal boundary is called Windows-verified.",
+    "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist."
+  ]
+}

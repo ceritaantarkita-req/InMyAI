@@ -28,7 +28,9 @@ def test_manifest_is_raw_and_keeps_r0_separate_from_terminal_r3() -> None:
     manifest = response.json()
     assert manifest['schemaVersion'] == '1.0.0'
     assert manifest['canonicalId'] == 'inmyai'
-    assert 'data' not in manifest
+    assert 'success' not in manifest
+    assert isinstance(manifest['data'], dict)
+    assert manifest['data']['policy'] == 'local-only'
 
     by_id = {item['id']: item for item in manifest['capabilities']}
     assert by_id['ai.project.search']['riskClass'] == 'R0'

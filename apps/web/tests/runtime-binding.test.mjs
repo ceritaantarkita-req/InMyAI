@@ -6,9 +6,13 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const packagePath = path.resolve(here, '..', 'package.json')
+const rootPackagePath = path.resolve(here, '..', '..', '..', 'package.json')
 
-test('web dev uses the fixed loopback port and start binds explicitly to loopback', async () => {
+test('web and API launchers use the validated loopback port wrappers', async () => {
   const packageJson = JSON.parse(await readFile(packagePath, 'utf8'))
-  assert.equal(packageJson.scripts.dev, 'next dev -H 127.0.0.1 -p 3000')
-  assert.equal(packageJson.scripts.start, 'next start -H 127.0.0.1')
+  const rootPackageJson = JSON.parse(await readFile(rootPackagePath, 'utf8'))
+
+  assert.equal(packageJson.scripts.dev, 'node ../../scripts/run-web.mjs dev')
+  assert.equal(packageJson.scripts.start, 'node ../../scripts/run-web.mjs start')
+  assert.equal(rootPackageJson.scripts['dev:api'], 'node scripts/run-api.mjs')
 })

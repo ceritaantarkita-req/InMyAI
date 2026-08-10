@@ -56,6 +56,8 @@ except ImportError:
 _TERMINAL_ALLOWED_ORIGINS = frozenset({
     'http://127.0.0.1:3000',
     'http://localhost:3000',
+    'http://127.0.0.1:17001',
+    'http://localhost:17001',
     'http://tauri.localhost',
     'https://tauri.localhost',
     'tauri://localhost',

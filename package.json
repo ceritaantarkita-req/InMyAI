@@ -10,7 +10,7 @@
     "build:web": "npm --workspace apps/web run build",
     "typecheck:web": "npm --workspace apps/web run typecheck",
     "test:web": "npm --workspace apps/web run test",
-    "dev:api": "python -m uvicorn services.api.app.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:api": "node scripts/run-api.mjs",
     "test:api": "python -m pytest services/api/tests -q",
     "setup": "node scripts/setup.mjs",
     "dev": "node scripts/dev.mjs",

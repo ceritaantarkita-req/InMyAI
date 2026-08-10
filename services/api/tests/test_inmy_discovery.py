@@ -58,6 +58,8 @@ def test_loopback_and_tauri_browser_origins_are_authorized() -> None:
     for origin in (
         'http://127.0.0.1:3000',
         'http://localhost:3000',
+        'http://127.0.0.1:17001',
+        'http://localhost:17001',
         'http://127.0.0.1:8000',
         'http://localhost:8000',
         'http://tauri.localhost',

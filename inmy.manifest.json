@@ -29,7 +29,8 @@
       "The desktop path uses a Tauri shell around the web client.",
       "The Docker image may listen on 0.0.0.0 inside its container namespace; local-first host publishing must remain loopback-scoped.",
       "G3 keeps the API/web defaults at 8000/3000 and adds validated canonical opt-ins INMYAI_API_PORT=17002 and INMYAI_WEB_PORT=17001.",
-      "Invalid or occupied opt-in ports fail before runtime startup; removing both overrides rolls back to the legacy topology."
+      "Invalid or occupied opt-in ports fail before runtime startup; removing both overrides rolls back to the legacy topology.",
+      "G4 adds a product-local inmy.lifecycle.json bound to this audited runtime source; it remains contract-only and does not enable Hub process control."
     ]
   },
   "platforms": {
@@ -258,6 +259,7 @@
     "Current Android/iOS client path is not implemented.",
     "Cross-platform performance budgets are not yet measured.",
     "Fresh Windows/Tauri E4 must be rerun after Phase B1/C2 before the new authority boundaries are called Windows-verified.",
-    "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist."
+    "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist.",
+    "The G4 API launch definition is trusted configuration only; owner-approved lifecycle mutation and target Windows child-tree evidence remain disabled/pending."
   ]
 }

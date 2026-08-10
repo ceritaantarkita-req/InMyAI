@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0.0",
+  "serviceId": "inmyai.api",
+  "canonicalId": "inmyai",
+  "platform": "win32",
+  "state": "contract-only",
+  "source": {
+    "repository": "ceritaantarkita-req/InMyAI",
+    "codeCommit": "b7e6e75bc92f8d399dfcfad766dedab5e237b60e",
+    "definitionPath": "inmy.lifecycle.json"
+  },
+  "launch": {
+    "executable": {
+      "resolver": "node-runtime"
+    },
+    "args": [
+      "scripts/run-api.mjs"
+    ],
+    "cwd": ".",
+    "environment": {
+      "inherit": [
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH"
+      ],
+      "set": {
+        "INMYAI_API_PORT": "8000"
+      }
+    }
+  },
+  "health": {
+    "url": "http://127.0.0.1:8000/api/health"
+  },
+  "dependencies": [
+    {
+      "id": "api-launch-script",
+      "resolver": "product-relative-file",
+      "path": "scripts/run-api.mjs",
+      "required": true
+    },
+    {
+      "id": "python-runtime",
+      "resolver": "product-relative-file",
+      "path": ".venv/Scripts/python.exe",
+      "required": true
+    }
+  ],
+  "security": {
+    "allowHttpOverrides": false,
+    "allowShell": false,
+    "allowSecrets": false,
+    "allowPathTraversal": false
+  }
+}

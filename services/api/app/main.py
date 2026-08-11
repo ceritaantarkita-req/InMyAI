@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import hmac
 import ipaddress
-import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -85,7 +84,7 @@ def health() -> dict:
 
 @app.post('/api/internal/lifecycle/shutdown', status_code=202)
 def managed_lifecycle_shutdown(request: Request, background_tasks: BackgroundTasks) -> dict:
-    expected = os.getenv('INMY_LIFECYCLE_SHUTDOWN_TOKEN', '')
+    expected = getattr(request.app.state, 'lifecycle_shutdown_token', '')
     if not expected:
         raise HTTPException(status_code=404, detail='Not found')
 

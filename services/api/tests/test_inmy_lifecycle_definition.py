@@ -13,7 +13,7 @@ def test_product_local_lifecycle_definition_is_bounded_and_control_disabled():
     assert value['canonicalId'] == 'inmyai'
     assert value['platform'] == 'win32'
     assert value['state'] == 'contract-only'
-    assert value['source']['codeCommit'] == 'b7e6e75bc92f8d399dfcfad766dedab5e237b60e'
+    assert value['source']['codeCommit'] == 'e3dfe9e19bc364ace43619a13b7ddd09bacbfe5c'
     assert value['launch']['executable'] == {'resolver': 'node-runtime'}
     assert value['launch']['args'] == ['scripts/run-api.mjs']
     assert value['launch']['cwd'] == '.'

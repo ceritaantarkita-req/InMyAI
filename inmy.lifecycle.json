@@ -6,7 +6,7 @@
   "state": "contract-only",
   "source": {
     "repository": "ceritaantarkita-req/InMyAI",
-    "codeCommit": "e3dfe9e19bc364ace43619a13b7ddd09bacbfe5c",
+    "codeCommit": "256ccdd09ef11206b87d75b617af8c0eb8a34258",
     "definitionPath": "inmy.lifecycle.json"
   },
   "launch": {

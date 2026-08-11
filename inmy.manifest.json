@@ -8,7 +8,7 @@
   "source": {
     "repository": "ceritaantarkita-req/InMyAI",
     "defaultBranch": "main",
-    "codeCommit": "0aac6fbd1acbb29c56af14078528154872b20255",
+    "codeCommit": "f4b3f5af5ae5f218e148aa9f9dbeecb184ddfbad",
     "manifestPath": "inmy.manifest.json"
   },
   "lifecycle": "standalone-ready",
@@ -17,7 +17,7 @@
     "command": "npm run dev",
     "hostPolicy": "loopback-only",
     "port": 8000,
-    "portEnv": null,
+    "portEnv": "INMYAI_API_PORT",
     "health": {
       "method": "GET",
       "path": "/api/health",
@@ -28,7 +28,9 @@
       "The Next.js web client normally uses port 3000.",
       "The desktop path uses a Tauri shell around the web client.",
       "The Docker image may listen on 0.0.0.0 inside its container namespace; local-first host publishing must remain loopback-scoped.",
-      "A later coexistence phase should replace hard-coded development ports with the ecosystem port contract where safe."
+      "G3 keeps the API/web defaults at 8000/3000 and adds validated canonical opt-ins INMYAI_API_PORT=17002 and INMYAI_WEB_PORT=17001.",
+      "Invalid or occupied opt-in ports fail before runtime startup; removing both overrides rolls back to the legacy topology.",
+      "G4 adds a product-local inmy.lifecycle.json bound to this audited runtime source; manager-owned processes support ephemeral-token graceful shutdown while public Hub process-control routes remain disabled."
     ]
   },
   "platforms": {
@@ -95,6 +97,7 @@
       "HTTP browser origins are exact allowlisted for loopback/Tauri clients; private-LAN browser CORS is not accepted",
       "The discovery health response is minimal and no longer exposes the database filesystem path",
       "Raw GET /api/inmy/manifest is served behind the HTTP authority boundary",
+      "Managed lifecycle shutdown is disabled without an ephemeral Hub-generated token and exits through Uvicorn's normal shutdown path",
       "Terminal remains visibly documented as an unsandboxed real OS-user shell"
     ],
     "knownOpenFindings": [
@@ -257,6 +260,7 @@
     "Current Android/iOS client path is not implemented.",
     "Cross-platform performance budgets are not yet measured.",
     "Fresh Windows/Tauri E4 must be rerun after Phase B1/C2 before the new authority boundaries are called Windows-verified.",
-    "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist."
+    "R2/R3 capability routing from InMyHub is not authorized until identity/delegation/approval/idempotency contracts exist.",
+    "The G4 API launch definition and graceful child-tree cleanup are Windows-verified on disposable canonical ports; public/real Hub lifecycle dispatch remains disabled pending its separate authority gate."
   ]
 }

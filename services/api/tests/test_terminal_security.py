@@ -24,6 +24,8 @@ class FakeWebSocket:
 def test_terminal_origin_allows_supported_inmyai_clients() -> None:
     assert terminal_module.is_terminal_origin_allowed('http://127.0.0.1:3000')
     assert terminal_module.is_terminal_origin_allowed('http://localhost:3000')
+    assert terminal_module.is_terminal_origin_allowed('http://127.0.0.1:17001')
+    assert terminal_module.is_terminal_origin_allowed('http://localhost:17001')
     assert terminal_module.is_terminal_origin_allowed('http://tauri.localhost')
     assert terminal_module.is_terminal_origin_allowed('https://tauri.localhost')
     assert terminal_module.is_terminal_origin_allowed('tauri://localhost')

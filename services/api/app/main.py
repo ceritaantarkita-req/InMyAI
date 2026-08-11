@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import hmac
+import ipaddress
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, WebSocket
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -78,6 +80,35 @@ def health() -> dict:
         'mode': 'local-first',
         'status': 'healthy',
     }
+
+
+@app.post('/api/internal/lifecycle/shutdown', status_code=202)
+def managed_lifecycle_shutdown(request: Request, background_tasks: BackgroundTasks) -> dict:
+    expected = getattr(request.app.state, 'lifecycle_shutdown_token', '')
+    if not expected:
+        raise HTTPException(status_code=404, detail='Not found')
+
+    client_host = request.client.host if request.client else ''
+    try:
+        client_is_loopback = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        client_is_loopback = client_host == 'testclient' and request.url.hostname == 'testserver'
+    if not client_is_loopback:
+        raise HTTPException(status_code=403, detail='Lifecycle shutdown requires a loopback manager')
+
+    authorization = request.headers.get('authorization', '')
+    prefix = 'Bearer '
+    supplied = authorization[len(prefix):] if authorization.startswith(prefix) else ''
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail='Lifecycle shutdown token is invalid')
+
+    callback = getattr(request.app.state, 'lifecycle_shutdown', None)
+    if not callable(callback):
+        raise HTTPException(status_code=503, detail='Managed shutdown is unavailable')
+    if not getattr(request.app.state, 'lifecycle_shutdown_requested', False):
+        request.app.state.lifecycle_shutdown_requested = True
+        background_tasks.add_task(callback)
+    return {'accepted': True}
 
 
 @app.get('/api/inmy/manifest')

@@ -28,6 +28,10 @@ def test_manifest_is_raw_and_keeps_r0_separate_from_terminal_r3() -> None:
     manifest = response.json()
     assert manifest['schemaVersion'] == '1.0.0'
     assert manifest['canonicalId'] == 'inmyai'
+    assert manifest['source']['codeCommit'] == 'f4b3f5af5ae5f218e148aa9f9dbeecb184ddfbad'
+    assert manifest['runtime']['port'] == 8000
+    assert manifest['runtime']['portEnv'] == 'INMYAI_API_PORT'
+    assert any('INMYAI_WEB_PORT=17001' in note for note in manifest['runtime']['notes'])
     assert 'success' not in manifest
     assert isinstance(manifest['data'], dict)
     assert manifest['data']['policy'] == 'local-only'
@@ -58,6 +62,8 @@ def test_loopback_and_tauri_browser_origins_are_authorized() -> None:
     for origin in (
         'http://127.0.0.1:3000',
         'http://localhost:3000',
+        'http://127.0.0.1:17001',
+        'http://localhost:17001',
         'http://127.0.0.1:8000',
         'http://localhost:8000',
         'http://tauri.localhost',

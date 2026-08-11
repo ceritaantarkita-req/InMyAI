@@ -13,7 +13,9 @@ const python = process.platform === 'win32'
   : path.join(repoRoot, '.venv', 'bin', 'python')
 const child = spawn(
   python,
-  ['-m', 'uvicorn', 'services.api.app.main:app', '--host', '127.0.0.1', '--port', String(api), '--reload'],
+  process.env.INMY_LIFECYCLE_SHUTDOWN_TOKEN
+    ? ['-m', 'services.api.app.managed_server']
+    : ['-m', 'uvicorn', 'services.api.app.main:app', '--host', '127.0.0.1', '--port', String(api), '--reload'],
   { cwd: repoRoot, stdio: 'inherit', shell: false },
 )
 

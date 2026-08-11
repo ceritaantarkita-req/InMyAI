@@ -28,7 +28,7 @@ def test_manifest_is_raw_and_keeps_r0_separate_from_terminal_r3() -> None:
     manifest = response.json()
     assert manifest['schemaVersion'] == '1.0.0'
     assert manifest['canonicalId'] == 'inmyai'
-    assert manifest['source']['codeCommit'] == '256ccdd09ef11206b87d75b617af8c0eb8a34258'
+    assert manifest['source']['codeCommit'] == 'f4b3f5af5ae5f218e148aa9f9dbeecb184ddfbad'
     assert manifest['runtime']['port'] == 8000
     assert manifest['runtime']['portEnv'] == 'INMYAI_API_PORT'
     assert any('INMYAI_WEB_PORT=17001' in note for note in manifest['runtime']['notes'])

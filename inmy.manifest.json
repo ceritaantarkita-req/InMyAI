@@ -8,7 +8,7 @@
   "source": {
     "repository": "ceritaantarkita-req/InMyAI",
     "defaultBranch": "main",
-    "codeCommit": "256ccdd09ef11206b87d75b617af8c0eb8a34258",
+    "codeCommit": "f4b3f5af5ae5f218e148aa9f9dbeecb184ddfbad",
     "manifestPath": "inmy.manifest.json"
   },
   "lifecycle": "standalone-ready",

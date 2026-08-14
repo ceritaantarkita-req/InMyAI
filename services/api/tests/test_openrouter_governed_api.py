@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -97,8 +98,7 @@ def fake_transaction():
     yield FakeTransaction()
 
 
-@pytest.mark.asyncio
-async def test_explicit_openrouter_chat_uses_governed_client_without_auto_route_or_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_openrouter_chat_uses_governed_client_without_auto_route_or_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     stub = StubConnectClient()
     monkeypatch.setattr(main, '_openrouter_client', lambda: stub)
     monkeypatch.setattr(main, 'transaction', fake_transaction)
@@ -115,7 +115,7 @@ async def test_explicit_openrouter_chat_uses_governed_client_without_auto_route_
 
     monkeypatch.setattr(main.MockProvider, 'chat', forbidden_mock)
 
-    result = await main.chat(ChatRequest(
+    result = asyncio.run(main.chat(ChatRequest(
         project_id=9,
         message='Use the project context and answer.',
         provider='openrouter',
@@ -124,7 +124,7 @@ async def test_explicit_openrouter_chat_uses_governed_client_without_auto_route_
         idempotency_key='openrouter-chat-api-0001',
         input_sensitivity='INTERNAL',
         requested_output_tokens=512,
-    ))
+    )))
 
     assert result['answer'] == 'Governed answer.'
     assert result['provider'] == 'openrouter'
@@ -141,8 +141,7 @@ async def test_explicit_openrouter_chat_uses_governed_client_without_auto_route_
     assert call['messages'][-1] == {'role': 'user', 'content': 'Use the project context and answer.'}
 
 
-@pytest.mark.asyncio
-async def test_openrouter_failure_is_returned_safely_and_never_falls_back_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openrouter_failure_is_returned_safely_and_never_falls_back_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     class FailingClient(StubConnectClient):
         async def chat(self, **kwargs) -> dict:
             raise ConnectOpenRouterError('InMyConnect request failed with status 503 (CONNECT_UNAVAILABLE).', status_code=503)
@@ -166,14 +165,14 @@ async def test_openrouter_failure_is_returned_safely_and_never_falls_back_to_moc
     monkeypatch.setattr(main.MockProvider, 'chat', forbidden_mock)
 
     with pytest.raises(HTTPException) as raised:
-        await main.chat(ChatRequest(
+        asyncio.run(main.chat(ChatRequest(
             project_id=9,
             message='Fail safely.',
             provider='openrouter',
             model='qwen/qwen3-coder',
             connection_id=CONNECTION_ID,
             idempotency_key='openrouter-chat-api-0002',
-        ))
+        )))
     assert raised.value.status_code == 503
     assert 'CONNECT_UNAVAILABLE' in raised.value.detail
     assert mock_calls == 0

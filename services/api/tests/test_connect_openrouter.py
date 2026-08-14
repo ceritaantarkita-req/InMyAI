@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -48,13 +49,9 @@ def test_status_uses_exact_local_bridge_route_and_hub_service_bearer() -> None:
         captured['authorization'] = request.headers.get('authorization')
         return httpx.Response(200, json={'provider': 'openrouter', 'ready': True})
 
-    result = pytest.run(asyncio=False) if False else None
-    del result
-
     async def run() -> dict:
         return await make_client(handler).status()
 
-    import asyncio
     payload = asyncio.run(run())
     assert payload == {'provider': 'openrouter', 'ready': True}
     assert captured == {
@@ -78,7 +75,6 @@ def test_model_discovery_forwards_only_opaque_connection_and_idempotency() -> No
             idempotency_key='openrouter-models-test-0001',
         )
 
-    import asyncio
     payload = asyncio.run(run())
     assert payload['models'][0]['id'] == 'qwen/qwen3-coder'
     assert captured['path'] == '/api/openrouter/models'
@@ -122,7 +118,6 @@ def test_chat_forwards_explicit_model_and_bounded_governance_metadata() -> None:
             ],
         )
 
-    import asyncio
     payload = asyncio.run(run())
     assert payload['authorized'] is True
     assert captured['path'] == '/api/openrouter/chat'
@@ -167,12 +162,11 @@ def test_http_and_network_errors_are_sanitized_without_token_or_body_leakage() -
         assert str(raised.value) == 'InMyConnect local runtime is unavailable.'
         assert TOKEN not in str(raised.value)
 
-    import asyncio
     asyncio.run(http_failure())
     asyncio.run(network_failure())
 
 
-def test_client_rejects_invalid_model_connection_and_secret_shaped_message_fields_before_network() -> None:
+def test_client_rejects_invalid_model_connection_and_sensitivity_before_network() -> None:
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -208,7 +202,6 @@ def test_client_rejects_invalid_model_connection_and_secret_shaped_message_field
                 messages=[{'role': 'user', 'content': 'hello'}],
             )
 
-    import asyncio
     asyncio.run(run())
     assert calls == 0
 

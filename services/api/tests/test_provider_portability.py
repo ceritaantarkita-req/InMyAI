@@ -8,6 +8,7 @@ from services.api.app.provider_portability import (
     CONNECT_OPENAI_DESCRIPTOR_PATH,
     CONNECT_PROVIDER_FOUNDATION_REF,
     CONNECT_PROVIDER_FOUNDATION_REPOSITORY,
+    get_portable_provider_descriptor,
     list_portable_provider_catalog,
     plan_manual_provider_selection,
     portable_provider_is_execution_authorized,
@@ -35,6 +36,19 @@ def test_portable_provider_catalog_pins_accepted_connect_descriptor() -> None:
     assert provider['browser_session_credentials_allowed'] is False
     assert provider['model_discovery_state'] == 'provider-discovery-later'
     assert provider['default_model'] is None
+    assert provider['allowed_sensitivity'] == ('PUBLIC', 'INTERNAL')
+    assert provider['blocked_sensitivity'] == ('SENSITIVE', 'RESTRICTED')
+    assert provider['max_input_bytes'] == 262_144
+    assert provider['max_output_tokens'] == 8_192
+
+
+def test_single_descriptor_lookup_is_bounded_and_non_executable() -> None:
+    provider = get_portable_provider_descriptor('openai')
+    assert provider['provider_id'] == 'openai'
+    assert provider['execution_state'] == 'contract-only'
+    assert provider['dispatch_allowed'] is False
+    with pytest.raises(ValueError):
+        get_portable_provider_descriptor('unknown')
 
 
 def test_manual_cloud_selection_requires_explicit_provider_and_model() -> None:
@@ -52,6 +66,10 @@ def test_manual_cloud_selection_requires_explicit_provider_and_model() -> None:
     assert plan['credential_resolution'] == 'INMYCONNECT_ONLY'
     assert plan['risk_class'] == 'R1'
     assert plan['execution_state'] == 'contract-only'
+    assert plan['allowed_sensitivity'] == ['PUBLIC', 'INTERNAL']
+    assert plan['blocked_sensitivity'] == ['SENSITIVE', 'RESTRICTED']
+    assert plan['max_input_bytes'] == 262_144
+    assert plan['max_output_tokens'] == 8_192
     assert plan['raw_credential_exposure_allowed'] is False
     assert plan['browser_session_credentials_allowed'] is False
     assert plan['automatic_routing_allowed'] is False

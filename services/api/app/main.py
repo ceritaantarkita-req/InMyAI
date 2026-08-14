@@ -18,6 +18,7 @@ from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
 from .inmy_manifest import load_inmy_manifest
 from .local_security import ALLOWED_HTTP_ORIGINS, LocalAuthorityMiddleware
+from .provider_portability import list_portable_provider_catalog, plan_manual_provider_selection
 from .providers import MockProvider, OllamaProvider, ProviderResult, choose_ollama_model, get_ollama_install_state, get_ollama_status
 from .image_provider import generate_with_comfyui, generate_with_diffusers
 from .router_engine import route, to_dict
@@ -124,6 +125,36 @@ def hardware() -> dict:
 @app.get('/api/models/status')
 async def models_status() -> dict:
     return {'ollama': await get_ollama_status(), 'configured_provider': settings.provider}
+
+
+@app.get('/api/providers/portable')
+def portable_providers() -> list[dict]:
+    """Expose provider-selection metadata only; this endpoint grants no execution authority."""
+    return list_portable_provider_catalog()
+
+
+@app.post('/api/providers/portable/select')
+def select_portable_provider(payload: dict) -> dict:
+    """Build a manual, explicitly non-executable portable-provider selection plan."""
+    provider_id = payload.get('provider_id')
+    model_id = payload.get('model_id')
+    selection_mode = payload.get('selection_mode', 'manual')
+
+    if not isinstance(provider_id, str):
+        raise HTTPException(status_code=400, detail='provider_id must be a string.')
+    if not isinstance(model_id, str):
+        raise HTTPException(status_code=400, detail='model_id must be a string.')
+    if not isinstance(selection_mode, str):
+        raise HTTPException(status_code=400, detail='selection_mode must be a string.')
+
+    try:
+        return plan_manual_provider_selection(
+            provider_id,
+            model_id,
+            selection_mode=selection_mode,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get('/api/models/onboarding')
@@ -357,7 +388,6 @@ def create_decision(payload: DecisionCreate) -> dict:
         return services.create_decision(payload.model_dump())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 @app.get('/api/projects/{project_id}/graph')
 def graph(project_id: int, node: str = '') -> dict:

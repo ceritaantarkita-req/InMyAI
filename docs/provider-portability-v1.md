@@ -120,11 +120,15 @@ An explicitly selected future cloud provider must not silently fall back to anot
 
 ## GitHub Actions acceptance boundary
 
-Current InMyAI `.github/workflows/ci.yml` uses `ubuntu-latest` and triggers on pull requests.
+InMyAI `.github/workflows/ci.yml` is intentionally manual-only via `workflow_dispatch`.
 
-Hosted GitHub Actions are not accepted as candidate evidence in this program. Phase 5 acceptance uses an exact-head Ubuntu WSL local QA wrapper instead.
+Automatic hosted triggers for both `pull_request` and `push` are disabled. Opening or updating a Phase 5 PR therefore does not automatically consume hosted GitHub Actions.
 
-Because opening an InMyAI PR would automatically trigger the hosted workflow, no Phase 5 InMyAI PR should be opened until that trigger implication is separately reconciled or explicitly handled without relying on hosted Actions.
+Hosted GitHub Actions remain available only as an optional manual verification path when the repository owner explicitly chooses to run them. They are not acceptance evidence for this program.
+
+Phase 5 acceptance uses the exact-head Ubuntu WSL local QA wrapper, which verifies the hosted-workflow trigger boundary, full InMyAI QA, provider portability regression tests, deterministic QA artifact cleanup, and source-clone immutability.
+
+A Phase 5 InMyAI PR is eligible only after that exact-head local checkpoint passes.
 
 ## Next checkpoint
 

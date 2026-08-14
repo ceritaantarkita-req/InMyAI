@@ -17,8 +17,12 @@ class ChatRequest(BaseModel):
     project_id: int
     message: str = Field(min_length=1, max_length=20_000)
     conversation_id: int | None = None
-    provider: Literal['auto', 'mock', 'ollama'] = 'auto'
-    model: str | None = None
+    provider: Literal['auto', 'mock', 'ollama', 'openrouter'] = 'auto'
+    model: str | None = Field(default=None, max_length=192)
+    connection_id: str | None = Field(default=None, pattern=r'^conn_[A-Za-z0-9_-]{16,96}$')
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=256, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{7,255}$')
+    input_sensitivity: Literal['PUBLIC', 'INTERNAL'] = 'INTERNAL'
+    requested_output_tokens: int = Field(default=1024, ge=1, le=8192)
 
 
 class MemoryCreate(BaseModel):

@@ -65,13 +65,13 @@ python3 -m py_compile \
   services/api/tests/test_provider_portability.py \
   services/api/tests/test_provider_portability_api.py
 python3 - <<'PY'
+import ast
 from pathlib import Path
-from typing import get_args
-from services.api.app.schemas import ChatRequest
 
 main = Path('services/api/app/main.py').read_text(encoding='utf-8')
 page = Path('apps/web/src/app/providers/page.tsx').read_text(encoding='utf-8')
 workspace = Path('apps/web/src/components/Workspace.tsx').read_text(encoding='utf-8')
+schemas_source = Path('services/api/app/schemas.py').read_text(encoding='utf-8')
 
 for required in (
     "@app.get('/api/providers/portable')",
@@ -82,7 +82,40 @@ for required in (
     if required not in main:
         raise SystemExit(f'missing portable-provider API boundary: {required}')
 
-if set(get_args(ChatRequest.model_fields['provider'].annotation)) != {'auto', 'mock', 'ollama'}:
+# Keep this static check dependency-free. Importing schemas here would import
+# Pydantic before the detached worktree has linked the prepared .venv. Parse
+# the Literal annotation directly instead, so this early boundary check works
+# with the system Python and still fails closed if ChatRequest.provider changes.
+tree = ast.parse(schemas_source)
+chat_request = next(
+    (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ChatRequest'),
+    None,
+)
+if chat_request is None:
+    raise SystemExit('ChatRequest schema is missing')
+provider_annotation = None
+for statement in chat_request.body:
+    if (
+        isinstance(statement, ast.AnnAssign)
+        and isinstance(statement.target, ast.Name)
+        and statement.target.id == 'provider'
+    ):
+        provider_annotation = statement.annotation
+        break
+if not (
+    isinstance(provider_annotation, ast.Subscript)
+    and isinstance(provider_annotation.value, ast.Name)
+    and provider_annotation.value.id == 'Literal'
+):
+    raise SystemExit('ChatRequest.provider is no longer a Literal boundary')
+provider_slice = provider_annotation.slice
+provider_nodes = provider_slice.elts if isinstance(provider_slice, ast.Tuple) else [provider_slice]
+provider_values = {
+    node.value
+    for node in provider_nodes
+    if isinstance(node, ast.Constant) and isinstance(node.value, str)
+}
+if provider_values != {'auto', 'mock', 'ollama'} or len(provider_nodes) != 3:
     raise SystemExit('ChatRequest.provider execution boundary changed')
 
 for required in (

@@ -5,13 +5,14 @@ import re
 from typing import Any
 
 
-PHASE5_PROVIDER_PORTABILITY_SCHEMA = '1.0.0'
+PHASE5_PROVIDER_PORTABILITY_SCHEMA = '1.1.0'
 CONNECT_PROVIDER_FOUNDATION_REPOSITORY = 'ceritaantarkita-req/InMyConnect'
-CONNECT_PROVIDER_FOUNDATION_REF = 'ef39c199c302f3e6797994e0fa4a025d2a47b241'
-CONNECT_OPENAI_DESCRIPTOR_PATH = 'providers/openai-official-api-v1.json'
+CONNECT_PROVIDER_FOUNDATION_REF = '65d8be8692da237961dc19a76147bab8739c8597'
+CONNECT_OPENROUTER_ADAPTER_PATH = 'src/providers/openrouter.mjs'
+CONNECT_OPENROUTER_RUNTIME_PATH = 'src/connect-openrouter-governed-runtime.mjs'
 
 _PROVIDER_ID = re.compile(r'^[a-z][a-z0-9-]{1,63}$')
-_MODEL_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$')
+_MODEL_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/~-]{0,191}$')
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class PortableProviderDescriptor:
     descriptor_repository: str
     descriptor_ref: str
     descriptor_path: str
+    runtime_path: str
     execution_state: str
     risk_class: str
     selection_mode: str
@@ -39,23 +41,24 @@ class PortableProviderDescriptor:
     max_output_tokens: int
 
 
-OPENAI_OFFICIAL_API = PortableProviderDescriptor(
-    provider_id='openai',
-    display_name='OpenAI API',
-    transport='official-api',
+OPENROUTER = PortableProviderDescriptor(
+    provider_id='openrouter',
+    display_name='OpenRouter',
+    transport='official-api-via-inmyconnect',
     connection_owner='InMyConnect',
     descriptor_repository=CONNECT_PROVIDER_FOUNDATION_REPOSITORY,
     descriptor_ref=CONNECT_PROVIDER_FOUNDATION_REF,
-    descriptor_path=CONNECT_OPENAI_DESCRIPTOR_PATH,
-    execution_state='contract-only',
+    descriptor_path=CONNECT_OPENROUTER_ADAPTER_PATH,
+    runtime_path=CONNECT_OPENROUTER_RUNTIME_PATH,
+    execution_state='hub-governed',
     risk_class='R1',
     selection_mode='manual-only',
     automatic_routing_allowed=False,
-    dispatch_allowed=False,
+    dispatch_allowed=True,
     credential_resolution='INMYCONNECT_ONLY',
     raw_credential_exposure_allowed=False,
     browser_session_credentials_allowed=False,
-    model_discovery_state='provider-discovery-later',
+    model_discovery_state='account-filtered-live-via-connect',
     default_model=None,
     allowed_sensitivity=('PUBLIC', 'INTERNAL'),
     blocked_sensitivity=('SENSITIVE', 'RESTRICTED'),
@@ -64,7 +67,7 @@ OPENAI_OFFICIAL_API = PortableProviderDescriptor(
 )
 
 _PORTABLE_PROVIDERS = {
-    OPENAI_OFFICIAL_API.provider_id: OPENAI_OFFICIAL_API,
+    OPENROUTER.provider_id: OPENROUTER,
 }
 
 
@@ -78,8 +81,6 @@ def _bounded_identifier(value: str, regex: re.Pattern[str], label: str) -> str:
 
 
 def get_portable_provider_descriptor(provider_id: str) -> dict[str, Any]:
-    """Return one bounded portable-provider descriptor without execution authority."""
-
     provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
     descriptor = _PORTABLE_PROVIDERS.get(provider)
     if descriptor is None:
@@ -88,12 +89,12 @@ def get_portable_provider_descriptor(provider_id: str) -> dict[str, Any]:
 
 
 def list_portable_provider_catalog() -> list[dict[str, Any]]:
-    """Return Phase 5 portable-provider metadata without resolving credentials.
+    """Return the explicit Phase 5 cloud-provider catalog.
 
-    This catalog is intentionally separate from the current local Ollama/mock
-    runtime catalog. It describes additional provider candidates that can be
-    shown to users before provider execution exists. No entry returned by this
-    function is execution authority.
+    OpenRouter is the first real provider target. The catalog contains no API
+    key, does not choose a model automatically, and does not authorize silent
+    fallback. Execution still requires the local InMyConnect bridge and a Hub
+    authorization for every R1 request.
     """
 
     return [get_portable_provider_descriptor(key) for key in sorted(_PORTABLE_PROVIDERS)]
@@ -105,13 +106,6 @@ def plan_manual_provider_selection(
     *,
     selection_mode: str = 'manual',
 ) -> dict[str, Any]:
-    """Build a non-executable plan for an explicitly chosen cloud provider/model.
-
-    Phase 5 begins with user-owned manual selection. The result is metadata for
-    later Hub/Connect policy evaluation only. It performs no network call,
-    resolves no credential, and cannot authorize provider dispatch.
-    """
-
     provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
     if selection_mode != 'manual':
         raise ValueError('Portable cloud provider selection must remain manual.')
@@ -124,19 +118,20 @@ def plan_manual_provider_selection(
         raise ValueError('Provider descriptor does not allow the required manual-only selection mode.')
     if descriptor.automatic_routing_allowed:
         raise ValueError('Provider descriptor unexpectedly permits automatic routing.')
-    if descriptor.dispatch_allowed:
-        raise ValueError('Provider descriptor unexpectedly permits dispatch.')
+    if descriptor.dispatch_allowed is not True:
+        raise ValueError('Provider descriptor does not expose the governed execution path.')
 
     return {
         'schema_version': PHASE5_PROVIDER_PORTABILITY_SCHEMA,
         'provider': descriptor.provider_id,
         'model': model,
         'selection_mode': 'manual',
-        'selection_status': 'SELECTED_NOT_EXECUTABLE',
+        'selection_status': 'SELECTED_GOVERNED_PATH',
         'descriptor': {
             'repository': descriptor.descriptor_repository,
             'ref': descriptor.descriptor_ref,
             'path': descriptor.descriptor_path,
+            'runtime_path': descriptor.runtime_path,
         },
         'connection_owner': descriptor.connection_owner,
         'credential_resolution': descriptor.credential_resolution,
@@ -149,17 +144,17 @@ def plan_manual_provider_selection(
         'raw_credential_exposure_allowed': False,
         'browser_session_credentials_allowed': False,
         'automatic_routing_allowed': False,
-        'dispatch_allowed': False,
+        'dispatch_allowed': True,
         'network_call_performed': False,
-        'next_gate': 'HUB_CONNECT_GOVERNED_PROVIDER_EXECUTION',
+        'next_gate': 'CONNECT_RUNTIME_AND_HUB_SERVICE_IDENTITY',
     }
 
 
 def portable_provider_is_execution_authorized(provider_id: str) -> bool:
-    """Fail closed for every Phase 5 portable-provider candidate in this slice."""
+    """Return whether a provider may be dispatched only through the governed path."""
 
     provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
     descriptor = _PORTABLE_PROVIDERS.get(provider)
     if descriptor is None:
         return False
-    return descriptor.dispatch_allowed is True and descriptor.execution_state == 'authorized'
+    return descriptor.dispatch_allowed is True and descriptor.execution_state == 'hub-governed'

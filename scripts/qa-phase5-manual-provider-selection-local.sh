@@ -76,13 +76,21 @@ print('provider portability static boundary: PASS')
 PY
 
 echo "=== INMYAI HOSTED WORKFLOW BOUNDARY ==="
-if grep -Eq 'runs-on:[[:space:]]*ubuntu-latest' .github/workflows/ci.yml && grep -Eq '^[[:space:]]*pull_request:' .github/workflows/ci.yml; then
-  echo "HOSTED PR WORKFLOW PRESENT: YES"
-  echo "HOSTED ACTIONS ACCEPTANCE: NOT USED"
-  echo "INMYAI PR OPENING: BLOCKED UNTIL WORKFLOW/TRIGGER BOUNDARY IS RECONCILED"
-else
-  echo "HOSTED PR WORKFLOW PRESENT: NO/CHANGED — review exact workflow before any PR"
+if grep -Eq '^[[:space:]]*(pull_request|push):' .github/workflows/ci.yml; then
+  echo "STOP: hosted CI still has an automatic push/pull_request trigger" >&2
+  exit 1
 fi
+
+if ! grep -Eq '^[[:space:]]*workflow_dispatch:' .github/workflows/ci.yml; then
+  echo "STOP: hosted CI is not explicitly manual-only via workflow_dispatch" >&2
+  exit 1
+fi
+
+echo "HOSTED PR WORKFLOW AUTO-TRIGGER: DISABLED"
+echo "HOSTED PUSH WORKFLOW AUTO-TRIGGER: DISABLED"
+echo "HOSTED WORKFLOW MANUAL DISPATCH: ENABLED"
+echo "HOSTED ACTIONS ACCEPTANCE: NOT USED"
+echo "HOSTED WORKFLOW TRIGGER BOUNDARY: PASS"
 
 # Keep the detached worktree self-contained for Node/Next/Turbopack. A symlink
 # from this /tmp worktree to the source clone's node_modules crosses the Next
@@ -181,9 +189,10 @@ AUTOMATIC CLOUD ROUTING: NOT AUTHORIZED
 PROVIDER DISPATCH: NOT IMPLEMENTED / NOT AUTHORIZED
 CURRENT OLLAMA/MOCK CHAT PATH: UNCHANGED
 HOSTED ACTIONS ACCEPTANCE: NOT USED
-INMYAI PRODUCT PR: NOT AUTHORIZED BY THIS CHECKPOINT
+HOSTED_WORKFLOW_TRIGGER_BOUNDARY=PASS
 LOCAL_WORKFLOW_EQUIVALENT_CI=PASS
 QA_WORKTREE_CLEANLINESS=PASS
+INMYAI PRODUCT PR: ELIGIBLE AFTER THIS CHECKPOINT
 PHASE 5: IN PROGRESS
 ========================================================
 EOF

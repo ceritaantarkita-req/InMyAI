@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import re
+from typing import Any
+
+
+PHASE5_PROVIDER_PORTABILITY_SCHEMA = '1.0.0'
+CONNECT_PROVIDER_FOUNDATION_REPOSITORY = 'ceritaantarkita-req/InMyConnect'
+CONNECT_PROVIDER_FOUNDATION_REF = 'ef39c199c302f3e6797994e0fa4a025d2a47b241'
+CONNECT_OPENAI_DESCRIPTOR_PATH = 'providers/openai-official-api-v1.json'
+
+_PROVIDER_ID = re.compile(r'^[a-z][a-z0-9-]{1,63}$')
+_MODEL_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$')
+
+
+@dataclass(frozen=True)
+class PortableProviderDescriptor:
+    provider_id: str
+    display_name: str
+    transport: str
+    connection_owner: str
+    descriptor_repository: str
+    descriptor_ref: str
+    descriptor_path: str
+    execution_state: str
+    risk_class: str
+    selection_mode: str
+    automatic_routing_allowed: bool
+    dispatch_allowed: bool
+    credential_resolution: str
+    raw_credential_exposure_allowed: bool
+    browser_session_credentials_allowed: bool
+    model_discovery_state: str
+    default_model: str | None
+
+
+OPENAI_OFFICIAL_API = PortableProviderDescriptor(
+    provider_id='openai',
+    display_name='OpenAI API',
+    transport='official-api',
+    connection_owner='InMyConnect',
+    descriptor_repository=CONNECT_PROVIDER_FOUNDATION_REPOSITORY,
+    descriptor_ref=CONNECT_PROVIDER_FOUNDATION_REF,
+    descriptor_path=CONNECT_OPENAI_DESCRIPTOR_PATH,
+    execution_state='contract-only',
+    risk_class='R1',
+    selection_mode='manual-only',
+    automatic_routing_allowed=False,
+    dispatch_allowed=False,
+    credential_resolution='INMYCONNECT_ONLY',
+    raw_credential_exposure_allowed=False,
+    browser_session_credentials_allowed=False,
+    model_discovery_state='provider-discovery-later',
+    default_model=None,
+)
+
+_PORTABLE_PROVIDERS = {
+    OPENAI_OFFICIAL_API.provider_id: OPENAI_OFFICIAL_API,
+}
+
+
+def _bounded_identifier(value: str, regex: re.Pattern[str], label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f'{label} must be a string.')
+    cleaned = value.strip()
+    if cleaned != value or not regex.fullmatch(cleaned):
+        raise ValueError(f'{label} is invalid.')
+    return cleaned
+
+
+def list_portable_provider_catalog() -> list[dict[str, Any]]:
+    """Return Phase 5 portable-provider metadata without resolving credentials.
+
+    This catalog is intentionally separate from the current local Ollama/mock
+    runtime catalog. It describes additional provider candidates that can be
+    shown to users before provider execution exists. No entry returned by this
+    function is execution authority.
+    """
+
+    return [asdict(_PORTABLE_PROVIDERS[key]) for key in sorted(_PORTABLE_PROVIDERS)]
+
+
+def plan_manual_provider_selection(
+    provider_id: str,
+    model_id: str,
+    *,
+    selection_mode: str = 'manual',
+) -> dict[str, Any]:
+    """Build a non-executable plan for an explicitly chosen cloud provider/model.
+
+    Phase 5 begins with user-owned manual selection. The result is metadata for
+    later Hub/Connect policy evaluation only. It performs no network call,
+    resolves no credential, and cannot authorize provider dispatch.
+    """
+
+    provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
+    if selection_mode != 'manual':
+        raise ValueError('Portable cloud provider selection must remain manual.')
+    descriptor = _PORTABLE_PROVIDERS.get(provider)
+    if descriptor is None:
+        raise ValueError(f'Portable provider is not registered: {provider}.')
+    model = _bounded_identifier(model_id, _MODEL_ID, 'model_id')
+
+    if descriptor.selection_mode != 'manual-only':
+        raise ValueError('Provider descriptor does not allow the required manual-only selection mode.')
+    if descriptor.automatic_routing_allowed:
+        raise ValueError('Provider descriptor unexpectedly permits automatic routing.')
+    if descriptor.dispatch_allowed:
+        raise ValueError('Provider descriptor unexpectedly permits dispatch.')
+
+    return {
+        'schema_version': PHASE5_PROVIDER_PORTABILITY_SCHEMA,
+        'provider': descriptor.provider_id,
+        'model': model,
+        'selection_mode': 'manual',
+        'selection_status': 'SELECTED_NOT_EXECUTABLE',
+        'descriptor': {
+            'repository': descriptor.descriptor_repository,
+            'ref': descriptor.descriptor_ref,
+            'path': descriptor.descriptor_path,
+        },
+        'connection_owner': descriptor.connection_owner,
+        'credential_resolution': descriptor.credential_resolution,
+        'risk_class': descriptor.risk_class,
+        'execution_state': descriptor.execution_state,
+        'raw_credential_exposure_allowed': False,
+        'browser_session_credentials_allowed': False,
+        'automatic_routing_allowed': False,
+        'dispatch_allowed': False,
+        'network_call_performed': False,
+        'next_gate': 'HUB_CONNECT_GOVERNED_PROVIDER_EXECUTION',
+    }
+
+
+def portable_provider_is_execution_authorized(provider_id: str) -> bool:
+    """Fail closed for every Phase 5 portable-provider candidate in this slice."""
+
+    provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
+    descriptor = _PORTABLE_PROVIDERS.get(provider)
+    if descriptor is None:
+        return False
+    return descriptor.dispatch_allowed is True and descriptor.execution_state == 'authorized'

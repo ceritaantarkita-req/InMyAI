@@ -54,20 +54,22 @@ else
   echo "HOSTED PR WORKFLOW PRESENT: NO/CHANGED — review exact workflow before any PR"
 fi
 
-# The repository QA script expects product-local dependency paths. In a detached
-# git worktree, reuse the already-installed dependencies from the source clone
-# without copying secrets or changing tracked files.
+# Keep the detached worktree self-contained for Node/Next/Turbopack. A symlink
+# from this /tmp worktree to the source clone's node_modules crosses the Next
+# project filesystem root and Turbopack rejects it. npm ci is lockfile-pinned,
+# writes only ignored node_modules state, and leaves tracked source untouched.
+if [[ ! -d node_modules || -L node_modules ]]; then
+  rm -rf node_modules
+  echo "=== PREPARE WORKTREE NODE DEPENDENCIES ==="
+  npm ci --no-audit --no-fund
+fi
+
+# Python dependencies can safely reuse the source clone's prepared virtualenv;
+# Python does not impose Turbopack's project-root symlink restriction. The
+# virtualenv path is ignored by git and contains no repository credentials.
 COMMON_DIR="$(git rev-parse --git-common-dir)"
 if [[ "$COMMON_DIR" != /* ]]; then COMMON_DIR="$(pwd)/$COMMON_DIR"; fi
 SOURCE_ROOT="$(cd "$(dirname "$COMMON_DIR")" && pwd)"
-
-if [[ ! -e node_modules ]]; then
-  [[ -d "$SOURCE_ROOT/node_modules" ]] || {
-    echo "STOP: source InMyAI node_modules is missing; run npm ci in $SOURCE_ROOT first" >&2
-    exit 1
-  }
-  ln -s "$SOURCE_ROOT/node_modules" node_modules
-fi
 
 if [[ ! -e .venv ]]; then
   [[ -x "$SOURCE_ROOT/.venv/bin/python" ]] || {

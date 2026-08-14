@@ -1,8 +1,11 @@
 name: CI
+
+# Hosted GitHub Actions are intentionally manual-only for this repository.
+# Local reproducible QA is the acceptance gate for development and PR review;
+# this workflow remains available as an optional hosted verification path when
+# the repository owner explicitly chooses to run it.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

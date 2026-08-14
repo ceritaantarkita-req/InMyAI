@@ -33,6 +33,10 @@ class PortableProviderDescriptor:
     browser_session_credentials_allowed: bool
     model_discovery_state: str
     default_model: str | None
+    allowed_sensitivity: tuple[str, ...]
+    blocked_sensitivity: tuple[str, ...]
+    max_input_bytes: int
+    max_output_tokens: int
 
 
 OPENAI_OFFICIAL_API = PortableProviderDescriptor(
@@ -53,6 +57,10 @@ OPENAI_OFFICIAL_API = PortableProviderDescriptor(
     browser_session_credentials_allowed=False,
     model_discovery_state='provider-discovery-later',
     default_model=None,
+    allowed_sensitivity=('PUBLIC', 'INTERNAL'),
+    blocked_sensitivity=('SENSITIVE', 'RESTRICTED'),
+    max_input_bytes=262_144,
+    max_output_tokens=8_192,
 )
 
 _PORTABLE_PROVIDERS = {
@@ -69,6 +77,16 @@ def _bounded_identifier(value: str, regex: re.Pattern[str], label: str) -> str:
     return cleaned
 
 
+def get_portable_provider_descriptor(provider_id: str) -> dict[str, Any]:
+    """Return one bounded portable-provider descriptor without execution authority."""
+
+    provider = _bounded_identifier(provider_id, _PROVIDER_ID, 'provider_id')
+    descriptor = _PORTABLE_PROVIDERS.get(provider)
+    if descriptor is None:
+        raise ValueError(f'Portable provider is not registered: {provider}.')
+    return asdict(descriptor)
+
+
 def list_portable_provider_catalog() -> list[dict[str, Any]]:
     """Return Phase 5 portable-provider metadata without resolving credentials.
 
@@ -78,7 +96,7 @@ def list_portable_provider_catalog() -> list[dict[str, Any]]:
     function is execution authority.
     """
 
-    return [asdict(_PORTABLE_PROVIDERS[key]) for key in sorted(_PORTABLE_PROVIDERS)]
+    return [get_portable_provider_descriptor(key) for key in sorted(_PORTABLE_PROVIDERS)]
 
 
 def plan_manual_provider_selection(
@@ -124,6 +142,10 @@ def plan_manual_provider_selection(
         'credential_resolution': descriptor.credential_resolution,
         'risk_class': descriptor.risk_class,
         'execution_state': descriptor.execution_state,
+        'allowed_sensitivity': list(descriptor.allowed_sensitivity),
+        'blocked_sensitivity': list(descriptor.blocked_sensitivity),
+        'max_input_bytes': descriptor.max_input_bytes,
+        'max_output_tokens': descriptor.max_output_tokens,
         'raw_credential_exposure_allowed': False,
         'browser_session_credentials_allowed': False,
         'automatic_routing_allowed': False,

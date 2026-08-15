@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     diffusers_model_id: str = 'stabilityai/sd-turbo'
     model_registry_path: Path = Path('models/registry.json')
     idle_model_timeout_seconds: int = 300
+
+    # Phase 5 governed cloud-provider bridge. This is the local InMyConnect
+    # HTTP boundary, never the provider API origin. The service credential is
+    # the InMyHub identity credential for agent:inmyai; it is server-side only
+    # and must never be returned to the browser or used as an OpenRouter key.
+    connect_base_url: str = 'http://127.0.0.1:8766'
+    connect_timeout_seconds: float = 20.0
+    hub_service_token: SecretStr = SecretStr('')
 
     @property
     def database_path(self) -> Path:

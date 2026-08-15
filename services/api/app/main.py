@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import hmac
 import ipaddress
@@ -13,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
+from .connect_openrouter import ConnectOpenRouterError, create_connect_openrouter_client
 from .database import connect, migrate, transaction, utc_now
 from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
@@ -122,20 +124,47 @@ def hardware() -> dict:
     return services.hardware_snapshot()
 
 
+def _openrouter_client():
+    token = settings.hub_service_token.get_secret_value()
+    if not token:
+        raise HTTPException(status_code=503, detail='Hub service identity is not configured for governed OpenRouter execution.')
+    try:
+        return create_connect_openrouter_client(
+            base_url=settings.connect_base_url,
+            hub_service_token=token,
+            timeout_seconds=settings.connect_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMyConnect bridge configuration is invalid.') from exc
+
+
+def _connect_http_error(exc: ConnectOpenRouterError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
 @app.get('/api/models/status')
 async def models_status() -> dict:
-    return {'ollama': await get_ollama_status(), 'configured_provider': settings.provider}
+    return {
+        'ollama': await get_ollama_status(),
+        'configured_provider': settings.provider,
+        'openrouter': {
+            'provider': 'openrouter',
+            'governed': True,
+            'hub_service_identity_configured': bool(settings.hub_service_token.get_secret_value()),
+            'raw_provider_credential_in_inmyai': False,
+        },
+    }
 
 
 @app.get('/api/providers/portable')
 def portable_providers() -> list[dict]:
-    """Expose provider-selection metadata only; this endpoint grants no execution authority."""
+    """Expose the bounded manual provider catalog without provider credentials."""
     return list_portable_provider_catalog()
 
 
 @app.post('/api/providers/portable/select')
 def select_portable_provider(payload: dict) -> dict:
-    """Build a manual, explicitly non-executable portable-provider selection plan."""
+    """Build an explicit model selection for the Hub-governed provider path."""
     provider_id = payload.get('provider_id')
     model_id = payload.get('model_id')
     selection_mode = payload.get('selection_mode', 'manual')
@@ -155,6 +184,31 @@ def select_portable_provider(payload: dict) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/providers/openrouter/status')
+async def openrouter_status() -> dict:
+    try:
+        return await _openrouter_client().status()
+    except ConnectOpenRouterError as exc:
+        raise _connect_http_error(exc) from exc
+
+
+@app.post('/api/providers/openrouter/models')
+async def openrouter_models(payload: dict) -> dict:
+    connection_id = payload.get('connection_id')
+    idempotency_key = payload.get('idempotency_key')
+    if not isinstance(connection_id, str) or not isinstance(idempotency_key, str):
+        raise HTTPException(status_code=400, detail='connection_id and idempotency_key are required strings.')
+    try:
+        return await _openrouter_client().list_models(
+            connection_id=connection_id,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ConnectOpenRouterError as exc:
+        raise _connect_http_error(exc) from exc
 
 
 @app.get('/api/models/onboarding')
@@ -297,7 +351,6 @@ def add_allowed_root(payload: AllowedRootCreate) -> dict:
 def delete_allowed_root(root_id: int) -> dict:
     services.remove_allowed_root(root_id)
     return {'ok': True}
-
 
 @app.get('/api/projects/scope')
 def project_scope(path: str = Query(...)) -> dict:
@@ -446,7 +499,6 @@ def git_branches_endpoint(project_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 @app.get('/api/projects/{project_id}/git/diff')
 def git_diff_endpoint(project_id: int, path: str = Query('')) -> dict:
@@ -627,7 +679,13 @@ def run_local_tool_decision(decision, message: str, project_id: int) -> Provider
 @app.post('/api/chat')
 async def chat(payload: ChatRequest) -> dict:
     ollama = await get_ollama_status()
-    decision = route(payload.message, payload.provider, ollama['available'])
+    # OpenRouter is explicit/manual only. We reuse the deterministic task
+    # classifier with mock selected solely to derive task/context limits, then
+    # pin the provider back to OpenRouter before any model dispatch.
+    decision = route(payload.message, 'mock' if payload.provider == 'openrouter' else payload.provider, ollama['available'])
+    if payload.provider == 'openrouter':
+        decision.provider = 'openrouter'
+        decision.reason = 'Explicit manual OpenRouter selection through Hub-governed InMyConnect; automatic routing and fallback are disabled.'
     context, citations = services.build_context(payload.project_id, payload.message, max_chars=decision.context_limit * 3)
     now = utc_now()
     with transaction() as conn:
@@ -655,9 +713,51 @@ async def chat(payload: ChatRequest) -> dict:
         elif decision.provider == 'ollama':
             selected_model = choose_ollama_model(decision.task, ollama.get('models', []), payload.model)
             result = await OllamaProvider().chat(messages, selected_model)
+        elif decision.provider == 'openrouter':
+            if not payload.connection_id or not payload.model or not payload.idempotency_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail='OpenRouter chat requires connection_id, model, and idempotency_key.',
+                )
+            attempt_hash = hashlib.sha256(
+                f'{payload.project_id}:{payload.idempotency_key}'.encode('utf-8')
+            ).hexdigest()[:32]
+            governed = await _openrouter_client().chat(
+                workflow_run_id=f'chat-{attempt_hash}',
+                delegation_id=f'inmyai-chat-{attempt_hash}',
+                connection_id=payload.connection_id,
+                model_id=payload.model,
+                idempotency_key=payload.idempotency_key,
+                input_sensitivity=payload.input_sensitivity,
+                requested_output_tokens=payload.requested_output_tokens,
+                messages=messages,
+            )
+            if governed.get('authorized') is not True:
+                raise ConnectOpenRouterError('Hub denied governed OpenRouter execution.', status_code=403, code='HUB_R1_DENIED')
+            receipt = governed.get('receipt')
+            outputs = receipt.get('outputs') if isinstance(receipt, dict) else None
+            assistant_message = outputs.get('message') if isinstance(outputs, dict) else None
+            answer = assistant_message.get('content') if isinstance(assistant_message, dict) else None
+            if not isinstance(answer, str):
+                raise ConnectOpenRouterError('InMyConnect returned an invalid OpenRouter execution receipt.')
+            returned_model = outputs.get('returnedModel') if isinstance(outputs.get('returnedModel'), str) else payload.model
+            result = ProviderResult(text=answer, model=returned_model, provider='openrouter')
         else:
             result = await MockProvider().chat(messages, payload.model)
+    except HTTPException:
+        raise
+    except ConnectOpenRouterError as exc:
+        # Never silently fall back from an explicitly selected cloud provider.
+        raise _connect_http_error(exc) from exc
+    except ValueError as exc:
+        if payload.provider == 'openrouter':
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        result = await MockProvider().chat(messages, payload.model)
+        decision.provider = 'mock'
+        decision.reason = f'Local provider failed safely: {exc}'
     except Exception as exc:
+        if payload.provider == 'openrouter':
+            raise HTTPException(status_code=502, detail='Governed OpenRouter execution failed safely without fallback.') from exc
         result = await MockProvider().chat(messages, payload.model)
         decision.provider = 'mock'
         decision.reason = f'Ollama failed safely: {exc}'
@@ -747,7 +847,6 @@ async def run_task(task_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 @app.post('/api/tasks/{task_id}/cancel')
 def cancel_task(task_id: int) -> dict:

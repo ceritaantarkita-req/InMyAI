@@ -178,6 +178,53 @@ def test_openrouter_failure_is_returned_safely_and_never_falls_back_to_mock(monk
     assert mock_calls == 0
 
 
+def test_openrouter_hub_unavailable_is_surfaced_explicitly_and_never_falls_back_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D9 (2026-08-15): a Hub health-check failure inside InMyConnect must
+    surface to the InMyAI caller as its own distinct, explicit status/message
+    (503 CONNECT_HUB_UNAVAILABLE) rather than a generic upstream error, and
+    -- like every other explicit-OpenRouter failure path -- must never
+    silently fall back to the mock provider."""
+
+    class HubUnavailableClient(StubConnectClient):
+        async def chat(self, **kwargs) -> dict:
+            raise ConnectOpenRouterError(
+                'InMyHub is unavailable; no OpenRouter execution can be authorized.',
+                status_code=503,
+                code='CONNECT_HUB_UNAVAILABLE',
+            )
+
+    monkeypatch.setattr(main, '_openrouter_client', lambda: HubUnavailableClient())
+    monkeypatch.setattr(main, 'transaction', fake_transaction)
+    monkeypatch.setattr(main.services, 'build_context', lambda project_id, message, max_chars: ('context', []))
+    monkeypatch.setattr(main, 'utc_now', lambda: '2026-08-14T16:00:00Z')
+
+    async def ollama_status() -> dict:
+        return {'available': False, 'models': []}
+
+    monkeypatch.setattr(main, 'get_ollama_status', ollama_status)
+    mock_calls = 0
+
+    async def forbidden_mock(*args, **kwargs):
+        nonlocal mock_calls
+        mock_calls += 1
+        raise AssertionError('Mock fallback must not run.')
+
+    monkeypatch.setattr(main.MockProvider, 'chat', forbidden_mock)
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(main.chat(ChatRequest(
+            project_id=9,
+            message='Fail closed when the Hub is down.',
+            provider='openrouter',
+            model='qwen/qwen3-coder',
+            connection_id=CONNECTION_ID,
+            idempotency_key='openrouter-chat-api-0003',
+        )))
+    assert raised.value.status_code == 503
+    assert raised.value.detail == 'InMyHub is unavailable; no OpenRouter execution can be authorized.'
+    assert mock_calls == 0
+
+
 def test_openrouter_runtime_source_contains_no_direct_provider_endpoint_or_provider_key() -> None:
     main_source = Path('services/api/app/main.py').read_text(encoding='utf-8').lower()
     client_source = Path('services/api/app/connect_openrouter.py').read_text(encoding='utf-8').lower()

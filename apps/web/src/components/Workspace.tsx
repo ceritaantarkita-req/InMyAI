@@ -385,12 +385,41 @@ function EmptyProject({ onOpen }: { onOpen: () => void }) {
   return <div className="empty-state"><FolderOpen size={38}/><h2>Add a local project</h2><p>InMyAI only indexes folders you explicitly register. Private data stays on your device.</p><button className="primary" onClick={onOpen}><Plus size={16}/>Add project</button></div>
 }
 
+// Mirrors the connection/model persistence keys and idempotency-key shape
+// already established by app/providers/page.tsx's portable-provider setup
+// flow. Kept as a local, independent copy rather than a cross-page import so
+// the Chat composer and the /providers configuration surface stay decoupled
+// modules; the string literals must match app/providers/page.tsx exactly,
+// since that page is the only place these localStorage keys are written.
+const OPENROUTER_CONNECTION_KEY = 'inmyai:openrouter:connectionId'
+const OPENROUTER_MODEL_KEY = 'inmyai:openrouter:modelId'
+
+function newIdempotencyKey(prefix: string) {
+  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now()}${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${random}`.slice(0, 128)
+}
+
 function ChatView({ project, ollamaAvailable, ollamaModels, onRefreshModels, onNavigate }: { project: Project; ollamaAvailable: boolean; ollamaModels: { name: string }[]; onRefreshModels: () => Promise<void>; onNavigate: (view: View) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: `Project ${project.name} is selected. Ask about its architecture, files, decisions, or errors. I will retrieve local context before answering.` }
   ])
   const [input, setInput] = useState('')
-  const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama'>('auto')
+  const [provider, setProvider] = useState<'auto' | 'mock' | 'ollama' | 'openrouter'>('auto')
+  // Explicit-only, per docs/phase5-openrouter-inmyai-wiring-v1.md: the
+  // composer never invents or defaults a connection/model - it only reads
+  // what the user already explicitly saved on the /providers page. Empty
+  // means "not configured yet", which keeps the OpenRouter option disabled
+  // below rather than silently falling back to another provider.
+  const [openrouterConnectionId, setOpenrouterConnectionId] = useState('')
+  const [openrouterModelId, setOpenrouterModelId] = useState('')
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setOpenrouterConnectionId(window.localStorage.getItem(OPENROUTER_CONNECTION_KEY) || '')
+    setOpenrouterModelId(window.localStorage.getItem(OPENROUTER_MODEL_KEY) || '')
+  }, [])
+  const openrouterReady = Boolean(openrouterConnectionId && openrouterModelId)
   // '' means "let the backend pick" (its own registry-based heuristic,
   // matched to task type + hardware profile) - only meaningful once
   // provider is 'ollama'. The backend already supported an explicit model
@@ -511,6 +540,11 @@ function ChatView({ project, ollamaAvailable, ollamaModels, onRefreshModels, onN
 
   async function send() {
     const typed = input.trim(); if (!typed || sending) return
+    // Same explicit-only rule as the disabled dropdown option below: never
+    // silently downgrade an OpenRouter send to another provider just
+    // because the saved connection/model went missing between render and
+    // submit (e.g. cleared in another tab).
+    if (provider === 'openrouter' && !openrouterReady) return
     // Attachments are a best-effort context hint, not a guaranteed override:
     // naming the file explicitly in the message text gives the backend's
     // retrieval a stronger signal to pull that file in, but (unlike Insert,
@@ -521,7 +555,24 @@ function ChatView({ project, ollamaAvailable, ollamaModels, onRefreshModels, onN
       : typed
     setMessages((current) => [...current, { role: 'user', content: message }]); setInput(''); setAttachments([]); setSending(true)
     try {
-      const result = await api<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ project_id: project.id, message, conversation_id: conversationId, provider, model: provider === 'ollama' && ollamaModel ? ollamaModel : undefined }) })
+      const result = await api<ChatResponse>('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: project.id,
+          message,
+          conversation_id: conversationId,
+          provider,
+          model: provider === 'ollama' && ollamaModel ? ollamaModel : provider === 'openrouter' ? openrouterModelId : undefined,
+          // connection_id/idempotency_key only ever apply to the explicit
+          // OpenRouter path (services/api/app/schemas.py's ChatRequest
+          // leaves both Optional/None for every other provider). A fresh
+          // idempotency key per send mirrors app/providers/page.tsx's
+          // newIdempotencyKey('openrouter-models') pattern for model
+          // discovery, scoped here to 'inmyai-chat'.
+          connection_id: provider === 'openrouter' ? openrouterConnectionId : undefined,
+          idempotency_key: provider === 'openrouter' ? newIdempotencyKey('inmyai-chat') : undefined
+        })
+      })
       setConversationId(result.conversation_id)
       if (typeof window !== 'undefined') window.localStorage.setItem(conversationStorageKey(project.id), String(result.conversation_id))
       setMessages((current) => [...current, { role: 'assistant', content: result.answer, route: result.route, citations: result.citations }])
@@ -584,7 +635,13 @@ function ChatView({ project, ollamaAvailable, ollamaModels, onRefreshModels, onN
               <option value="auto">Automatic router</option>
               <option value="mock">Safe mock</option>
               <option value="ollama" disabled={!ollamaAvailable}>Ollama local</option>
+              <option value="openrouter" disabled={!openrouterReady}>OpenRouter (governed)</option>
             </select>
+            {provider === 'openrouter' && (
+              openrouterReady
+                ? <small className="muted" style={{ marginLeft: 6 }}>Model: {openrouterModelId} · <a href="/providers">Change</a></small>
+                : <small className="muted" style={{ marginLeft: 6 }}>No connection saved yet - <a href="/providers">configure OpenRouter <ExternalLink size={11}/></a></small>
+            )}
             {provider === 'ollama' && ollamaModels.length > 0 && (
               <select className="composer-model" title="Ollama model" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)}>
                 <option value="">Auto-pick model</option>

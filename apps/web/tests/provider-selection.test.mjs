@@ -16,13 +16,39 @@ async function sources() {
   return { workspace, portablePage }
 }
 
-test('legacy chat provider selector remains local until the explicit OpenRouter UI handoff is completed', async () => {
+test('chat provider selector now exposes the explicit, Hub-governed OpenRouter option (bridge/live-E2E closure checkpoint)', async () => {
   const { workspace } = await sources()
   assert.match(workspace, /<option value="auto">Automatic router<\/option>/)
   assert.match(workspace, /<option value="mock">Safe mock<\/option>/)
   assert.match(workspace, /<option value="ollama" disabled=\{!ollamaAvailable\}>Ollama local<\/option>/)
+  assert.match(workspace, /<option value="openrouter" disabled=\{!openrouterReady\}>OpenRouter \(governed\)<\/option>/)
   assert.doesNotMatch(workspace, /<option value="openai"/)
-  assert.doesNotMatch(workspace, /<option value="openrouter"/)
+})
+
+test('chat composer only sends OpenRouter connection/model metadata that was already explicitly saved on /providers, never invents or defaults it', async () => {
+  const { workspace } = await sources()
+  // Disabled (and the send guard below) whenever either value is missing —
+  // the composer never falls back to another provider or a default model.
+  assert.match(workspace, /openrouterReady = Boolean\(openrouterConnectionId && openrouterModelId\)/)
+  assert.match(workspace, /if \(provider === 'openrouter' && !openrouterReady\) return/)
+  // Reads, never writes, the exact keys app/providers/page.tsx owns.
+  assert.match(workspace, /window\.localStorage\.getItem\(OPENROUTER_CONNECTION_KEY\)/)
+  assert.match(workspace, /window\.localStorage\.getItem\(OPENROUTER_MODEL_KEY\)/)
+  assert.match(workspace, /const OPENROUTER_CONNECTION_KEY = 'inmyai:openrouter:connectionId'/)
+  assert.match(workspace, /const OPENROUTER_MODEL_KEY = 'inmyai:openrouter:modelId'/)
+  // The governed /api/chat request shape from services/api/app/schemas.py's
+  // ChatRequest: connection_id + idempotency_key are only ever populated for
+  // the explicit OpenRouter path, and a fresh idempotency key is minted per
+  // send rather than reused.
+  assert.match(workspace, /connection_id: provider === 'openrouter' \? openrouterConnectionId : undefined/)
+  assert.match(workspace, /idempotency_key: provider === 'openrouter' \? newIdempotencyKey\('inmyai-chat'\) : undefined/)
+  // Same credential-safety boundary already enforced on the /providers page:
+  // the composer must never collect or reference a raw provider credential.
+  assert.doesNotMatch(workspace, /type=["']password["']/i)
+  assert.doesNotMatch(workspace, /OPENROUTER_API_KEY/)
+  assert.doesNotMatch(workspace, /access[_-]?token/i)
+  assert.doesNotMatch(workspace, /refresh[_-]?token/i)
+  assert.doesNotMatch(workspace, /openrouter\.ai/i)
 })
 
 test('portable provider surface exposes the Hub-governed OpenRouter path', async () => {

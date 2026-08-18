@@ -705,7 +705,15 @@ async def chat(payload: ChatRequest) -> dict:
         'You are InMyAI, a local-first project assistant. Use only the supplied project context. '
         'Distinguish verified facts, inferred relationships, and suggestions. Never claim a file was changed unless a tool result proves it.\n\n'
         + context
-    )
+    ).strip()
+    # .strip() matters beyond cosmetics here: when context is empty (e.g. a
+    # small/new project with little indexed content), the trailing '\n\n'
+    # above is never followed by anything, leaving literal trailing
+    # whitespace on the assembled system message. Mock/Ollama never cared,
+    # but connect_openrouter.py's _bounded_string() rejects any message
+    # content with leading/trailing whitespace (messages[0].content cannot
+    # have surrounding whitespace) as part of its governed-input contract -
+    # so the explicit OpenRouter path 400'd on exactly this case.
     messages = [{'role': 'system', 'content': system_message}, {'role': 'user', 'content': payload.message}]
     try:
         if decision.provider == 'local-tool':

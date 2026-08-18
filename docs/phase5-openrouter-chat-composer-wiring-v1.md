@@ -76,25 +76,32 @@ composer wiring this doc describes is safe to add.
 
 ## Remaining Phase 5 closure
 
-Per `docs/phase5-openrouter-inmyai-wiring-v1.md`'s original list, after this
-checkpoint:
+Per `docs/phase5-openrouter-inmyai-wiring-v1.md`'s original list:
 
 1. ~~expose the accepted InMyConnect governed OpenRouter runtime through a
    bounded loopback HTTP bridge~~ — done (InMyConnect
    `connect-openrouter-http-bridge.mjs`).
 2. ~~connect the standard InMyAI Chat composer to the saved explicit
    OpenRouter connection/model selection~~ — done by this checkpoint.
-3. configure the local Hub service identity and InMyConnect OpenRouter
-   credential envelope — done operationally on this machine (Phase E
-   `agent:inmyai` service credential minted via InMyHub's
-   `scripts/provision-inmyai-service-credential.mjs`; OpenRouter credential
-   registered via InMyConnect's `scripts/setup-openrouter-credential.mjs`),
-   but not yet captured as an in-repo acceptance record.
-4. run one explicit owner-authorized live OpenRouter end-to-end acceptance
+3. ~~configure the local Hub service identity and InMyConnect OpenRouter
+   credential envelope~~ — done and now captured as an in-repo acceptance
+   record: see `docs/phase5-openrouter-live-e2e-acceptance-v1.md`.
+4. ~~run one explicit owner-authorized live OpenRouter end-to-end acceptance
    through the Chat composer itself (not just the API contract tests) and
-   record the result.
-5. verify Hub authorization, Connect dispatch, provider output, receipt
-   recording, no fallback, and no secret leakage for that live run.
-6. close Phase 5 only after that live evidence is green.
+   record the result~~ — done 2026-08-18, recorded in
+   `docs/phase5-openrouter-live-e2e-acceptance-v1.md`. This same run also
+   surfaced and led to a fix for a real bug (`services/api/app/main.py`'s
+   system message failing OpenRouter's whitespace validation on empty
+   project context).
+5. ~~verify Hub authorization, Connect dispatch, provider output, receipt
+   recording, no fallback, and no secret leakage for that live run~~ — done,
+   see the same acceptance record for what was verified and how, including
+   an honest account of an operational credential-exposure incident during
+   this window and its remediation.
+6. ~~close Phase 5 only after that live evidence is green~~ — **done. Phase 5
+   is closed as of 2026-08-18.**
 
-Items 4-6 remain open after this checkpoint.
+**Status: Phase 5 (OpenRouter governed provider) is CLOSED.** All six items
+above have live evidence, not just contract/unit-test coverage. Any further
+OpenRouter work (additional models, spend-cap policy, multi-connection
+support, etc.) is new scope, not a Phase 5 reopening.

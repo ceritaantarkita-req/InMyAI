@@ -5,6 +5,7 @@ import json
 import hmac
 import ipaddress
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .connect_openrouter import ConnectOpenRouterError, create_connect_openrouter_client
 from .database import connect, migrate, transaction, utc_now
+from .efficiency_router_telemetry import build_chat_telemetry_record, record_chat_telemetry
 from .git_tools import git_blame, git_branches, git_diff, git_log, git_status
 from .indexer import index_project
 from .inmy_manifest import load_inmy_manifest
@@ -686,6 +688,16 @@ async def chat(payload: ChatRequest) -> dict:
     if payload.provider == 'openrouter':
         decision.provider = 'openrouter'
         decision.reason = 'Explicit manual OpenRouter selection through Hub-governed InMyConnect; automatic routing and fallback are disabled.'
+    # Q8.1 shadow telemetry (owner-approved 2026-08-19; see
+    # docs/plans/inmy_master_roadmap_V2.md Part 4 Q8.1 and
+    # efficiency_router_telemetry.py's module docstring for the full
+    # invariant list -- this is observation only, zero routing authority).
+    # selection_mode is a simplification, not a formal classification: any
+    # request where the caller specified a provider other than 'auto' is
+    # recorded as 'manual', everything else as 'heuristic'. This label does
+    # not feed back into routing in any way.
+    telemetry_selection_mode = 'manual' if payload.provider != 'auto' else 'heuristic'
+    telemetry_start = time.perf_counter()
     context, citations = services.build_context(payload.project_id, payload.message, max_chars=decision.context_limit * 3)
     now = utc_now()
     with transaction() as conn:
@@ -715,6 +727,10 @@ async def chat(payload: ChatRequest) -> dict:
     # have surrounding whitespace) as part of its governed-input contract -
     # so the explicit OpenRouter path 400'd on exactly this case.
     messages = [{'role': 'system', 'content': system_message}, {'role': 'user', 'content': payload.message}]
+    result = None
+    telemetry_usage = None
+    telemetry_outcome = 'success'
+    telemetry_error_class = None
     try:
         if decision.provider == 'local-tool':
             result = run_local_tool_decision(decision, payload.message, payload.project_id)
@@ -750,25 +766,56 @@ async def chat(payload: ChatRequest) -> dict:
                 raise ConnectOpenRouterError('InMyConnect returned an invalid OpenRouter execution receipt.')
             returned_model = outputs.get('returnedModel') if isinstance(outputs.get('returnedModel'), str) else payload.model
             result = ProviderResult(text=answer, model=returned_model, provider='openrouter')
+            telemetry_usage = outputs.get('usage') if isinstance(outputs, dict) else None
         else:
             result = await MockProvider().chat(messages, payload.model)
     except HTTPException:
+        telemetry_outcome = 'error'
+        telemetry_error_class = 'HTTPException'
         raise
     except ConnectOpenRouterError as exc:
         # Never silently fall back from an explicitly selected cloud provider.
+        telemetry_outcome = 'error'
+        telemetry_error_class = 'ConnectOpenRouterError'
         raise _connect_http_error(exc) from exc
     except ValueError as exc:
         if payload.provider == 'openrouter':
+            telemetry_outcome = 'error'
+            telemetry_error_class = 'ValueError'
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = await MockProvider().chat(messages, payload.model)
         decision.provider = 'mock'
         decision.reason = f'Local provider failed safely: {exc}'
+        telemetry_outcome = 'fallback'
+        telemetry_error_class = 'ValueError'
     except Exception as exc:
         if payload.provider == 'openrouter':
+            telemetry_outcome = 'error'
+            telemetry_error_class = type(exc).__name__
             raise HTTPException(status_code=502, detail='Governed OpenRouter execution failed safely without fallback.') from exc
         result = await MockProvider().chat(messages, payload.model)
         decision.provider = 'mock'
         decision.reason = f'Ollama failed safely: {exc}'
+        telemetry_outcome = 'fallback'
+        telemetry_error_class = type(exc).__name__
+    finally:
+        # Q8.1 shadow telemetry: strictly observational, best-effort, and
+        # never allowed to affect this response. Runs on every exit path,
+        # including re-raises, so failed/fallback outcomes are captured too,
+        # not just successes -- record_chat_telemetry() itself never raises.
+        record_chat_telemetry(build_chat_telemetry_record(
+            request_id=f'chat-{conversation_id}-{utc_now()}',
+            timestamp=utc_now(),
+            task=decision.task,
+            selection_mode=telemetry_selection_mode,
+            provider_used=decision.provider,
+            model_used=(result.model if result is not None else payload.model),
+            selection_reason=decision.reason,
+            latency_ms=int((time.perf_counter() - telemetry_start) * 1000),
+            outcome=telemetry_outcome,
+            error_class=telemetry_error_class,
+            usage=telemetry_usage,
+        ))
 
     with transaction() as conn:
         conn.execute(

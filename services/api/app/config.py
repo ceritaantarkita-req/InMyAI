@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     connect_timeout_seconds: float = 20.0
     hub_service_token: SecretStr = SecretStr('')
 
+    # Q11.1 (Phase 10, 2026-08-25): InMySandbox R1 execution (see
+    # connect_inmysandbox.py). Unlike OpenRouter, this has no bridge process
+    # of its own -- InMyAI talks to InMyHub's authority routes directly
+    # (reusing hub_service_token above, the same agent:inmyai credential
+    # already used for InMyConnect) and to InMySandbox's own loopback API
+    # directly. Defaults match each product's own real default port
+    # (InMyHub: server/config.mjs parsePort() default 8787; InMySandbox:
+    # server.mjs's INMYSANDBOX_PORT default 17421).
+    hub_base_url: str = 'http://127.0.0.1:8787'
+    hub_authority_timeout_seconds: float = 20.0
+    inmysandbox_base_url: str = 'http://127.0.0.1:17421'
+    inmysandbox_timeout_seconds: float = 305.0
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / 'inmyai.sqlite'

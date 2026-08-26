@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ProjectCreate(BaseModel):
@@ -87,3 +87,40 @@ class TaskCreate(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     instruction: str = Field(min_length=3, max_length=20_000)
     provider: str = 'auto'
+
+
+class SandboxRunInput(BaseModel):
+    # Mirrors InMySandbox's own lib/policy.mjs validateInputs(): flat
+    # filename only (no '/', no subdirectories), content is text.
+    path: str = Field(min_length=1, max_length=120, pattern=r'^[A-Za-z0-9._-]{1,120}$')
+    content: str = Field(default='', max_length=131_072)
+
+
+class SandboxRunRequest(BaseModel):
+    # Q11.1 Piece 3b: explicit, user-initiated small-script execution in a
+    # real isolated InMySandbox R1 sandbox. Deliberately NOT for running a
+    # project's actual test suite -- see connect_inmysandbox.py and this
+    # piece's design doc for why InMySandbox v0.1's real constraints
+    # (network=none, inputs capped at 20 flat files / 128 KiB combined,
+    # bare runtime images) cannot fit that. Field bounds below mirror
+    # InMySandbox's own lib/policy.mjs validatePolicy()/validateCommand()
+    # ranges so an out-of-range request fails fast here rather than only
+    # after a Hub authorization round-trip.
+    command: list[str] = Field(min_length=1, max_length=32)
+    inputs: list[SandboxRunInput] = Field(default_factory=list, max_length=20)
+    image: str = Field(default='python:3.13-alpine', min_length=1, max_length=128)
+    timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+    memory_mb: int = Field(default=512, ge=64, le=8192)
+    cpus: float = Field(default=1.0, ge=0.1, le=4)
+    pids: int = Field(default=128, ge=16, le=512)
+    disk_mb: int = Field(default=256, ge=32, le=4096)
+    ttl_seconds: int = Field(default=900, ge=30, le=3600)
+    idempotency_key: str = Field(min_length=8, max_length=256, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{7,255}$')
+    input_sensitivity: Literal['PUBLIC', 'INTERNAL'] = 'INTERNAL'
+
+    @model_validator(mode='after')
+    def _check_combined_input_bytes(self) -> 'SandboxRunRequest':
+        total = sum(len(item.content.encode('utf-8')) for item in self.inputs)
+        if total > 131_072:
+            raise ValueError('Combined inputs content exceeds 128 KiB, the InMySandbox v0.1 policy cap.')
+        return self

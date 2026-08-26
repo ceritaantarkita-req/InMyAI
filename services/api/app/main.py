@@ -7,7 +7,10 @@ import ipaddress
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +18,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
+from .connect_inmysandbox import (
+    SandboxExecutionError,
+    create_inmysandbox_runtime_client,
+    create_sandbox_authority_client,
+    sha256_digest,
+)
 from .connect_openrouter import ConnectOpenRouterError, create_connect_openrouter_client
 from .database import connect, migrate, transaction, utc_now
 from .efficiency_router_telemetry import build_chat_telemetry_record, record_chat_telemetry
@@ -30,7 +39,7 @@ from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_p
 from . import terminal as terminal_module
 from .schemas import (
     AgentCreate, AllowedRootCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
-    ProjectCreate, SearchRequest, TaskCreate, WriteProposalCreate
+    ProjectCreate, SandboxRunRequest, SearchRequest, TaskCreate, WriteProposalCreate
 )
 from . import services
 from . import agent_runtime
@@ -142,6 +151,210 @@ def _openrouter_client():
 
 def _connect_http_error(exc: ConnectOpenRouterError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+def _sandbox_authority_client():
+    token = settings.hub_service_token.get_secret_value()
+    if not token:
+        raise HTTPException(status_code=503, detail='Hub service identity is not configured for governed sandbox execution.')
+    try:
+        return create_sandbox_authority_client(
+            base_url=settings.hub_base_url,
+            hub_service_token=token,
+            timeout_seconds=settings.hub_authority_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMyHub sandbox authority configuration is invalid.') from exc
+
+
+def _inmysandbox_runtime_client():
+    try:
+        return create_inmysandbox_runtime_client(
+            base_url=settings.inmysandbox_base_url,
+            timeout_seconds=settings.inmysandbox_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMySandbox runtime configuration is invalid.') from exc
+
+
+def _sandbox_http_error(exc: SandboxExecutionError) -> HTTPException:
+    detail = str(exc)
+    if exc.execution_may_have_run:
+        detail += (
+            ' The sandbox execution may have already started before this error occurred -- '
+            'do not retry with the same idempotency_key.'
+        )
+    return HTTPException(status_code=exc.status_code, detail=detail)
+
+
+@app.post('/api/sandbox/run')
+async def sandbox_run(payload: SandboxRunRequest) -> dict:
+    """Q11.1 Piece 3b: run a small, self-contained command in a real,
+    isolated InMySandbox R1 execution, gated by InMyHub's
+    sandbox-execution-r1-authority (Piece 2). This is a deliberately
+    explicit, user-initiated action -- not something a chat turn or the
+    agent_runtime worker triggers on its own.
+
+    Scope note (see this piece's design doc): agent_runtime.py's existing
+    project test-verification step still runs as an unsandboxed host
+    subprocess, unchanged by this piece. InMySandbox v0.1's real
+    constraints -- network=none, inputs capped at 20 flat files / 128 KiB
+    combined, bare runtime images with no project dependencies -- cannot
+    fit a real project's test suite. This endpoint instead targets what
+    InMySandbox v0.1 actually supports: small, dependency-free scripts.
+    """
+    policy = {
+        'image': payload.image,
+        'network': 'none',
+        'ttlSeconds': payload.ttl_seconds,
+        'memoryMb': payload.memory_mb,
+        'cpus': payload.cpus,
+        'pids': payload.pids,
+        'diskMb': payload.disk_mb,
+    }
+    inputs = [{'path': item.path, 'content': item.content} for item in payload.inputs]
+    input_bytes = sum(len(item.content.encode('utf-8')) for item in payload.inputs)
+
+    policy_digest = sha256_digest(policy)
+    command_digest = sha256_digest(payload.command)
+    input_digest = sha256_digest(inputs)
+
+    run_ref = uuid4().hex
+    workflow_run_id = f'inmyai-sandbox-run-{run_ref}'
+    delegation_id = f'inmyai-sandbox-run-{run_ref}'
+
+    authority = _sandbox_authority_client()
+
+    try:
+        authorization = await authority.authorize(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            policy_digest=policy_digest,
+            command_digest=command_digest,
+            idempotency_key=payload.idempotency_key,
+            input_digest=input_digest,
+            input_bytes=input_bytes,
+            input_sensitivity=payload.input_sensitivity,
+        )
+    except SandboxExecutionError as exc:
+        raise _sandbox_http_error(exc) from exc
+
+    authorization_id = authorization.get('authorizationId')
+    if not isinstance(authorization_id, str) or not authorization_id:
+        raise HTTPException(status_code=502, detail='InMyHub sandbox authorization response is missing authorizationId.')
+
+    try:
+        await authority.record_intent(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            policy_digest=policy_digest,
+            command_digest=command_digest,
+            input_digest=input_digest,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except SandboxExecutionError as exc:
+        raise _sandbox_http_error(exc) from exc
+
+    runtime = _inmysandbox_runtime_client()
+    sandbox_id: str | None = None
+    job: dict[str, Any] | None = None
+    try:
+        sandbox = await runtime.create_sandbox(policy)
+        sandbox_id = sandbox.get('id')
+        if not isinstance(sandbox_id, str) or not sandbox_id:
+            raise HTTPException(status_code=502, detail='InMySandbox create-sandbox response is missing id.')
+        job = await runtime.run(
+            sandbox_id=sandbox_id,
+            command=payload.command,
+            inputs=inputs,
+            timeout_ms=payload.timeout_ms,
+        )
+    except SandboxExecutionError as exc:
+        # A clean (non-ambiguous) failure here means nothing real happened --
+        # see execution_may_have_run in connect_inmysandbox.py. Either way
+        # there is no receipt to record; the sandbox authorization above
+        # simply goes unused (Hub authorizations are inert until recorded).
+        raise _sandbox_http_error(exc) from exc
+    finally:
+        if sandbox_id:
+            try:
+                await runtime.destroy(sandbox_id)
+            except SandboxExecutionError:
+                pass  # best-effort cleanup; never mask the primary result/error
+
+    exit_code = job.get('exitCode')
+    timed_out = bool(job.get('timedOut'))
+    if timed_out:
+        outcome = 'timed_out'
+    elif isinstance(exit_code, int) and exit_code == 0:
+        outcome = 'completed'
+    else:
+        outcome = 'failed'
+
+    artifacts = job.get('artifacts')
+    artifact_count = len(artifacts) if isinstance(artifacts, list) else None
+
+    executed_at = job.get('finishedAt')
+    if not isinstance(executed_at, str) or not executed_at:
+        executed_at = datetime.now(timezone.utc).isoformat()
+
+    executor_receipt = {
+        'schemaVersion': '1.0.0',
+        'receiptId': 'sbxrct_' + uuid4().hex + uuid4().hex,
+        'authorizationId': authorization_id,
+        'providerId': 'inmysandbox',
+        'actionId': 'sandbox.run',
+        'policyDigest': policy_digest,
+        'commandDigest': command_digest,
+        'mode': 'sandbox-execution',
+        'riskClass': 'R1',
+        'inputDigest': input_digest,
+        'idempotencyKey': payload.idempotency_key,
+        'executedAt': executed_at,
+        'outcome': outcome,
+        'outputs': {
+            'exitCode': exit_code if isinstance(exit_code, int) else None,
+            'timedOut': timed_out,
+            'durationMs': job.get('durationMs') if isinstance(job.get('durationMs'), int) else None,
+            'artifactCount': artifact_count,
+            'artifactBytes': None,
+        },
+    }
+
+    try:
+        record = await authority.record_execution(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            policy_digest=policy_digest,
+            command_digest=command_digest,
+            input_digest=input_digest,
+            recorded_at=datetime.now(timezone.utc).isoformat(),
+            executor_receipt=executor_receipt,
+        )
+    except SandboxExecutionError as exc:
+        # The sandbox DID run for real (we have real results below) -- only
+        # the Hub audit record failed. Do not claim success; surface this as
+        # its own distinct failure rather than silently dropping the receipt.
+        raise HTTPException(
+            status_code=502,
+            detail=f'InMySandbox execution finished (outcome={outcome}) but recording it to InMyHub failed: {exc}',
+        ) from exc
+
+    return {
+        'authorizationId': authorization_id,
+        'hubReceiptId': record.get('receiptId'),
+        'outcome': outcome,
+        'stdout': job.get('stdout'),
+        'stderr': job.get('stderr'),
+        'exitCode': exit_code,
+        'timedOut': timed_out,
+        'durationMs': job.get('durationMs'),
+        'artifacts': artifacts if isinstance(artifacts, list) else [],
+    }
 
 
 @app.get('/api/models/status')

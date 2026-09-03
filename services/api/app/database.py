@@ -166,6 +166,29 @@ def migrate() -> None:
                 data_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS scenarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                description TEXT NOT NULL DEFAULT '',
+                script_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS scenario_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+                fixture_project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                status TEXT NOT NULL DEFAULT 'running',
+                task_ids_json TEXT NOT NULL DEFAULT '[]',
+                trace_json TEXT NOT NULL DEFAULT '{}',
+                trace_hash TEXT,
+                replay_of_run_id INTEGER REFERENCES scenario_runs(id) ON DELETE SET NULL,
+                replay_match INTEGER,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS allowed_roots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL UNIQUE,

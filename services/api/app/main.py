@@ -24,6 +24,12 @@ from .connect_inmysandbox import (
     create_sandbox_authority_client,
     sha256_digest,
 )
+from .connect_inmyrnd import (
+    RndExecutionError,
+    create_inmyrnd_runtime_client,
+    create_rnd_authority_client,
+    experiment_digest,
+)
 from .connect_openrouter import ConnectOpenRouterError, create_connect_openrouter_client
 from .database import connect, migrate, transaction, utc_now
 from .efficiency_router_telemetry import build_chat_telemetry_record, record_chat_telemetry
@@ -39,7 +45,7 @@ from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_p
 from . import terminal as terminal_module
 from .schemas import (
     AgentCreate, AllowedRootCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
-    ProjectCreate, SandboxRunRequest, SearchRequest, TaskCreate, WriteProposalCreate
+    ProjectCreate, RndRunRequest, SandboxRunRequest, SearchRequest, TaskCreate, WriteProposalCreate
 )
 from . import services
 from . import agent_runtime
@@ -354,6 +360,193 @@ async def sandbox_run(payload: SandboxRunRequest) -> dict:
         'timedOut': timed_out,
         'durationMs': job.get('durationMs'),
         'artifacts': artifacts if isinstance(artifacts, list) else [],
+    }
+
+
+def _rnd_authority_client():
+    token = settings.hub_service_token.get_secret_value()
+    if not token:
+        raise HTTPException(status_code=503, detail='Hub service identity is not configured for governed R&D execution.')
+    try:
+        return create_rnd_authority_client(
+            base_url=settings.hub_base_url,
+            hub_service_token=token,
+            timeout_seconds=settings.hub_authority_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMyHub R&D authority configuration is invalid.') from exc
+
+
+def _inmyrnd_runtime_client():
+    try:
+        return create_inmyrnd_runtime_client(
+            base_url=settings.inmyrnd_base_url,
+            timeout_seconds=settings.inmyrnd_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMyR&D runtime configuration is invalid.') from exc
+
+
+def _rnd_http_error(exc: RndExecutionError) -> HTTPException:
+    detail = str(exc)
+    if exc.execution_may_have_run:
+        detail += (
+            ' The R&D experiment run may have already been recorded before this error occurred -- '
+            'do not retry with the same idempotency_key.'
+        )
+    return HTTPException(status_code=exc.status_code, detail=detail)
+
+
+@app.post('/api/rnd/run')
+async def rnd_run(payload: RndRunRequest) -> dict:
+    """Q11.2 Piece 3b: evaluate an existing InMyR&D experiment through a
+    real, governed run, gated by InMyHub's rnd-execution-r1-authority
+    (Piece 2/2b). Like /api/sandbox/run, this is a deliberately explicit,
+    user-initiated action -- not something a chat turn or the
+    agent_runtime worker triggers on its own.
+
+    experiment_digest is computed HERE, server-side, from the experiment
+    InMyR&D itself currently holds -- never supplied by the caller. This
+    differs from /api/sandbox/run's policy/command digests, which the
+    caller constructs and therefore must supply: an experiment already
+    exists in InMyR&D before this endpoint is ever called, so accepting a
+    caller-supplied digest would only create a way to authorize against a
+    version of the experiment that is not the one actually about to run.
+    See connect_inmyrnd.py's experiment_digest() for the cross-checked
+    Python port of InMyR&D's own experimentDigest() this relies on.
+    """
+    runtime = _inmyrnd_runtime_client()
+    try:
+        experiments = await runtime.list_experiments()
+    except RndExecutionError as exc:
+        raise _rnd_http_error(exc) from exc
+
+    experiment = next((item for item in experiments if item.get('id') == payload.experiment_id), None)
+    if experiment is None or experiment.get('projectId') != payload.project_id:
+        raise HTTPException(status_code=404, detail='InMyR&D experiment was not found for this project.')
+
+    digest = experiment_digest(experiment)
+
+    run_ref = uuid4().hex
+    workflow_run_id = f'inmyai-rnd-run-{run_ref}'
+    delegation_id = f'inmyai-rnd-run-{run_ref}'
+
+    authority = _rnd_authority_client()
+
+    try:
+        authorization = await authority.authorize(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            project_id=payload.project_id,
+            experiment_id=payload.experiment_id,
+            experiment_digest=digest,
+            idempotency_key=payload.idempotency_key,
+        )
+    except RndExecutionError as exc:
+        raise _rnd_http_error(exc) from exc
+
+    authorization_id = authorization.get('authorizationId')
+    if not isinstance(authorization_id, str) or not authorization_id:
+        raise HTTPException(status_code=502, detail='InMyHub R&D authorization response is missing authorizationId.')
+
+    try:
+        await authority.record_intent(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            project_id=payload.project_id,
+            experiment_id=payload.experiment_id,
+            experiment_digest=digest,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except RndExecutionError as exc:
+        raise _rnd_http_error(exc) from exc
+
+    try:
+        run = await runtime.run_experiment(payload.experiment_id)
+    except RndExecutionError as exc:
+        # A clean (non-ambiguous) failure here means nothing real happened
+        # -- see execution_may_have_run in connect_inmyrnd.py. Either way
+        # there is no receipt to record; the authorization above simply
+        # goes unused (Hub authorizations are inert until recorded).
+        raise _rnd_http_error(exc) from exc
+
+    run_digest = run.get('experimentDigest')
+    if run_digest != digest:
+        # Structurally unreachable today -- InMyR&D has no experiment-edit
+        # endpoint, only create/list/run -- but fail closed with a named
+        # error rather than ever recording a receipt under the wrong
+        # digest, per this piece's design doc.
+        raise HTTPException(
+            status_code=502,
+            detail='InMyR&D run reported a different experimentDigest than the one this request authorized. Refusing to record.',
+        )
+
+    recommendation = run.get('recommendation')
+    rows = run.get('rows')
+    executed_at = run.get('createdAt')
+    if not isinstance(executed_at, str) or not executed_at:
+        executed_at = datetime.now(timezone.utc).isoformat()
+
+    executor_receipt = {
+        'schemaVersion': '1.0.0',
+        'receiptId': 'rndrct_' + uuid4().hex + uuid4().hex,
+        'authorizationId': authorization_id,
+        'providerId': 'inmyrnd',
+        'actionId': 'experiment.run',
+        'projectId': payload.project_id,
+        'experimentId': payload.experiment_id,
+        'experimentDigest': digest,
+        'mode': 'rnd-execution',
+        'riskClass': 'R1',
+        'idempotencyKey': payload.idempotency_key,
+        'executedAt': executed_at,
+        # Always 'completed': InMyR&D's evaluateExperiment() is pure and
+        # synchronous with no failure mode inside a successful HTTP 201
+        # response -- see this piece's design doc. Any error from
+        # run_experiment() itself aborts above, before a receipt is ever
+        # built.
+        'outcome': 'completed',
+        'outputs': {
+            'algorithmVersion': run.get('algorithmVersion'),
+            'evidenceSummary': run.get('evidenceSummary'),
+            'recommendationCaseId': recommendation.get('caseId') if isinstance(recommendation, dict) else None,
+            'recommendationScore': recommendation.get('score') if isinstance(recommendation, dict) else None,
+            'rowCount': len(rows) if isinstance(rows, list) else None,
+        },
+    }
+
+    try:
+        record = await authority.record_execution(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            project_id=payload.project_id,
+            experiment_id=payload.experiment_id,
+            experiment_digest=digest,
+            recorded_at=datetime.now(timezone.utc).isoformat(),
+            executor_receipt=executor_receipt,
+        )
+    except RndExecutionError as exc:
+        # InMyR&D DID run for real (we have real results below) -- only the
+        # Hub audit record failed. Do not claim success; surface this as
+        # its own distinct failure rather than silently dropping the
+        # receipt.
+        raise HTTPException(
+            status_code=502,
+            detail=f'InMyR&D experiment run finished but recording it to InMyHub failed: {exc}',
+        ) from exc
+
+    return {
+        'authorizationId': authorization_id,
+        'hubReceiptId': record.get('receiptId'),
+        'outcome': 'completed',
+        'runId': run.get('id'),
+        'rows': rows,
+        'recommendation': recommendation,
+        'disclaimer': run.get('disclaimer'),
     }
 
 

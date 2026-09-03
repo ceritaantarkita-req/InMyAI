@@ -49,6 +49,7 @@ from .schemas import (
 )
 from . import services
 from . import agent_runtime
+from . import scenario_runtime
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -1308,6 +1309,56 @@ async def run_task(task_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get('/api/scenarios')
+def scenarios() -> list[dict]:
+    return scenario_runtime.list_scenarios()
+
+
+@app.get('/api/scenarios/{slug}')
+def scenario_detail(slug: str) -> dict:
+    try:
+        return scenario_runtime.get_scenario(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get('/api/scenarios/{slug}/runs')
+def scenario_runs(slug: str) -> list[dict]:
+    try:
+        scenario = scenario_runtime.get_scenario(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return scenario_runtime.list_scenario_runs(scenario['id'])
+
+
+@app.post('/api/scenarios/{slug}/run')
+async def run_scenario(slug: str) -> dict:
+    try:
+        return await scenario_runtime.run_scenario(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post('/api/scenarios/{slug}/replay')
+async def replay_scenario(slug: str, against_run_id: int | None = Query(None)) -> dict:
+    try:
+        return await scenario_runtime.replay_scenario(slug, against_run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/scenario-runs/{run_id}')
+def scenario_run_detail(run_id: int) -> dict:
+    try:
+        return scenario_runtime.scenario_run_detail(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @app.post('/api/tasks/{task_id}/cancel')
 def cancel_task(task_id: int) -> dict:

@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     inmysandbox_base_url: str = 'http://127.0.0.1:17421'
     inmysandbox_timeout_seconds: float = 305.0
 
+    # Q11.2 (2026-09-03): InMyR&D R1 execution (see connect_inmyrnd.py).
+    # Same pattern as InMySandbox above -- InMyAI talks to InMyHub's
+    # authority routes directly (reusing hub_service_token, the same
+    # agent:inmyai credential already used for InMyConnect and InMySandbox)
+    # and to InMyR&D's own loopback API directly. Default matches
+    # InMyR&D's own real default port (server.mjs's INMYRND_PORT default
+    # 17420).
+    inmyrnd_base_url: str = 'http://127.0.0.1:17420'
+    inmyrnd_timeout_seconds: float = 20.0
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / 'inmyai.sqlite'

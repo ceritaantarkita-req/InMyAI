@@ -124,3 +124,17 @@ class SandboxRunRequest(BaseModel):
         if total > 131_072:
             raise ValueError('Combined inputs content exceeds 128 KiB, the InMySandbox v0.1 policy cap.')
         return self
+
+
+class RndRunRequest(BaseModel):
+    # Q11.2 Piece 3b: explicit, user-initiated InMyR&D experiment
+    # evaluation, gated by InMyHub's rnd-execution-r1-authority. Unlike
+    # SandboxRunRequest, there is no command/inputs/resource-limit surface
+    # to validate here -- InMyR&D's own POST /api/experiments/:id/run reads
+    # no request body and runs a pure, deterministic computation over an
+    # experiment InMyAI fetches and digests itself (see connect_inmyrnd.py
+    # and main.py's rnd_run() for why experiment_digest is computed
+    # server-side, never caller-supplied).
+    project_id: str = Field(min_length=1, max_length=42, pattern=r'^rndp_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    experiment_id: str = Field(min_length=1, max_length=42, pattern=r'^rnde_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    idempotency_key: str = Field(min_length=8, max_length=256, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{7,255}$')

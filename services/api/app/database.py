@@ -218,7 +218,8 @@ def migrate() -> None:
             "ALTER TABLE tasks ADD COLUMN artifact_path TEXT",
             "ALTER TABLE write_proposals ADD COLUMN original_sha256 TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE files ADD COLUMN parser TEXT NOT NULL DEFAULT 'text'",
-            "ALTER TABLE files ADD COLUMN parse_status TEXT NOT NULL DEFAULT 'indexed'"
+            "ALTER TABLE files ADD COLUMN parse_status TEXT NOT NULL DEFAULT 'indexed'",
+            "ALTER TABLE scenario_runs ADD COLUMN seed INTEGER"
         ):
             try:
                 conn.execute(statement)

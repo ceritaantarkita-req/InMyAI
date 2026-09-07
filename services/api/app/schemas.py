@@ -138,3 +138,7 @@ class RndRunRequest(BaseModel):
     project_id: str = Field(min_length=1, max_length=42, pattern=r'^rndp_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
     experiment_id: str = Field(min_length=1, max_length=42, pattern=r'^rnde_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
     idempotency_key: str = Field(min_length=8, max_length=256, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{7,255}$')
+
+
+class ScenarioRunRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=256, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{7,255}$')

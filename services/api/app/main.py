@@ -30,6 +30,12 @@ from .connect_inmyrnd import (
     create_rnd_authority_client,
     experiment_digest,
 )
+from .connect_scenariohub import (
+    ScenarioExecutionError,
+    create_scenario_authority_client,
+    scenario_digest_from_canonical_json,
+    scenario_step_count,
+)
 from .connect_openrouter import ConnectOpenRouterError, create_connect_openrouter_client
 from .database import connect, migrate, transaction, utc_now
 from .efficiency_router_telemetry import build_chat_telemetry_record, record_chat_telemetry
@@ -45,7 +51,8 @@ from .security import BLOCKED_FILENAMES, looks_like_project, resolve_browsable_p
 from . import terminal as terminal_module
 from .schemas import (
     AgentCreate, AllowedRootCreate, ChatRequest, DecisionCreate, ImageRequest, MemoryCreate, OCRRequest,
-    ProjectCreate, RndRunRequest, SandboxRunRequest, SearchRequest, TaskCreate, WriteProposalCreate
+    ProjectCreate, RndRunRequest, SandboxRunRequest, ScenarioRunRequest, SearchRequest, TaskCreate,
+    WriteProposalCreate
 )
 from . import services
 from . import agent_runtime
@@ -396,6 +403,136 @@ def _rnd_http_error(exc: RndExecutionError) -> HTTPException:
             'do not retry with the same idempotency_key.'
         )
     return HTTPException(status_code=exc.status_code, detail=detail)
+# Q11.3 Piece 3 (2026-09-04): governed InMyAI executor for bounded scenario
+# execution, gated by InMyHub's scenario-execution-r1-authority (Piece
+# 2/2b). Unlike rnd_run() above, there is no second (InMyR&D-shaped)
+# runtime client here -- the "executor" is InMyAI's own scenario_runtime.py,
+# called in-process by `call()` below. See connect_scenariohub.py's module
+# header for why outcome is always 'completed' here (scenario_runtime.py's
+# real run_scenario()/replay_scenario() re-raise on any internal failure
+# after marking the DB row 'failed', so a caller here either gets back a
+# completed run or an exception -- never a "successful call, internally
+# failed run" shape needing its own outcome branch) and why trace_hash must
+# be prefixed with 'sha256:' before it reaches Hub.
+def _scenario_authority_client():
+    token = settings.hub_service_token.get_secret_value()
+    if not token:
+        raise HTTPException(status_code=503, detail='Hub service identity is not configured for governed scenario execution.')
+    try:
+        return create_scenario_authority_client(
+            base_url=settings.hub_base_url,
+            hub_service_token=token,
+            timeout_seconds=settings.hub_authority_timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail='Local InMyHub scenario execution authority configuration is invalid.') from exc
+def _scenario_http_error(exc: ScenarioExecutionError) -> HTTPException:
+    detail = str(exc)
+    if exc.execution_may_have_run:
+        detail += (
+            ' The scenario run may have already executed before this error occurred -- '
+            'do not retry with the same idempotency_key.'
+        )
+    return HTTPException(status_code=exc.status_code, detail=detail)
+def _scenario_output_hash(value: str | None) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return f'sha256:{value}'
+async def _governed_scenario_run(slug: str, payload: ScenarioRunRequest, *, action: str, call) -> dict:
+    try:
+        scenario = scenario_runtime.get_scenario(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    digest = scenario_digest_from_canonical_json(scenario['script_json'])
+    scenario_version = scenario['version']
+    run_ref = uuid4().hex
+    workflow_run_id = f'inmyai-scenario-{action}-{run_ref}'
+    delegation_id = f'inmyai-scenario-{action}-{run_ref}'
+    authority = _scenario_authority_client()
+    try:
+        authorization = await authority.authorize(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            scenario_slug=slug,
+            scenario_version=scenario_version,
+            scenario_digest=digest,
+            idempotency_key=payload.idempotency_key,
+        )
+    except ScenarioExecutionError as exc:
+        raise _scenario_http_error(exc) from exc
+    authorization_id = authorization.get('authorizationId')
+    if not isinstance(authorization_id, str) or not authorization_id:
+        raise HTTPException(status_code=502, detail='InMyHub scenario authorization response is missing authorizationId.')
+    try:
+        await authority.record_intent(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            scenario_slug=slug,
+            scenario_version=scenario_version,
+            scenario_digest=digest,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except ScenarioExecutionError as exc:
+        raise _scenario_http_error(exc) from exc
+    run = await call()
+    trace_hash = _scenario_output_hash(run.get('trace_hash'))
+    replay_of_trace_hash = None
+    if run.get('replay_of_run_id') is not None:
+        try:
+            baseline = scenario_runtime.scenario_run_detail(run['replay_of_run_id'])
+        except KeyError:
+            baseline = None
+        if baseline is not None:
+            replay_of_trace_hash = _scenario_output_hash(baseline.get('trace_hash'))
+    step_count = scenario_step_count(run.get('task_ids_json'))
+    executed_at = run.get('completed_at')
+    if not isinstance(executed_at, str) or not executed_at:
+        executed_at = datetime.now(timezone.utc).isoformat()
+    executor_receipt = {
+        'schemaVersion': '1.0.0',
+        'receiptId': 'scenrct_' + uuid4().hex + uuid4().hex,
+        'authorizationId': authorization_id,
+        'providerId': 'inmyai-scenario',
+        'actionId': 'scenario.run',
+        'scenarioSlug': slug,
+        'scenarioVersion': scenario_version,
+        'scenarioDigest': digest,
+        'mode': 'scenario-execution',
+        'riskClass': 'R1',
+        'idempotencyKey': payload.idempotency_key,
+        'executedAt': executed_at,
+        'outcome': 'completed',
+        'outputs': {
+            'traceHash': trace_hash,
+            'stepCount': step_count,
+            'replayOfTraceHash': replay_of_trace_hash,
+            'replayMatch': run.get('replay_match'),
+        },
+    }
+    try:
+        record = await authority.record_execution(
+            workflow_run_id=workflow_run_id,
+            delegation_id=delegation_id,
+            authorization_id=authorization_id,
+            idempotency_key=payload.idempotency_key,
+            scenario_slug=slug,
+            scenario_version=scenario_version,
+            scenario_digest=digest,
+            recorded_at=datetime.now(timezone.utc).isoformat(),
+            executor_receipt=executor_receipt,
+        )
+    except ScenarioExecutionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f'Scenario {action} finished but recording it to InMyHub failed: {exc}',
+        ) from exc
+    return {
+        'authorizationId': authorization_id,
+        'hubReceiptId': record.get('receiptId'),
+        'run': run,
+    }
 
 
 @app.post('/api/rnd/run')
@@ -1333,23 +1470,27 @@ def scenario_runs(slug: str) -> list[dict]:
 
 
 @app.post('/api/scenarios/{slug}/run')
-async def run_scenario(slug: str) -> dict:
-    try:
-        return await scenario_runtime.run_scenario(slug)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+async def run_scenario(slug: str, payload: ScenarioRunRequest) -> dict:
+    async def call() -> dict:
+        try:
+            return await scenario_runtime.run_scenario(slug)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await _governed_scenario_run(slug, payload, action='run', call=call)
 
 
 @app.post('/api/scenarios/{slug}/replay')
-async def replay_scenario(slug: str, against_run_id: int | None = Query(None)) -> dict:
-    try:
-        return await scenario_runtime.replay_scenario(slug, against_run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+async def replay_scenario(slug: str, payload: ScenarioRunRequest, against_run_id: int | None = Query(None)) -> dict:
+    async def call() -> dict:
+        try:
+            return await scenario_runtime.replay_scenario(slug, against_run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await _governed_scenario_run(slug, payload, action='replay', call=call)
 
 
 @app.get('/api/scenario-runs/{run_id}')

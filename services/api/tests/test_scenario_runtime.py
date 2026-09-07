@@ -15,11 +15,44 @@ from fastapi.testclient import TestClient
 
 from services.api.app import scenario_runtime, services
 from services.api.app.database import migrate, transaction, utc_now
+from services.api.app import main
 from services.api.app.main import app
 
 client = TestClient(app)
 
 SLUG = 'q11-3-context-recall-v1'
+
+RUN_PAYLOAD = {'idempotency_key': 'scenario-runtime-http-test-0001'}
+
+
+class _AlwaysSucceedsScenarioAuthorityClient:
+    """Piece 3 (2026-09-04) gated these HTTP routes behind InMyHub's
+    scenario-execution-r1 authority. This file's own job is testing
+    scenario_runtime.py's real execution behavior end-to-end through the
+    HTTP layer, not Hub governance itself (that is exhaustively covered by
+    services/api/tests/test_scenario_run_endpoint.py's stub-based tests) --
+    so every test here gets one permissive, always-succeeding stub rather
+    than each test wiring its own.
+    """
+
+    async def authorize(self, **kwargs):
+        return {'authorizationId': 'scenauth_' + '0' * 40}
+
+    async def record_intent(self, **kwargs):
+        return {'intentId': 'scenhubi_' + '0' * 40}
+
+    async def record_execution(self, **kwargs):
+        return {
+            'receiptId': 'scenhubr_' + '0' * 40,
+            'authorizationId': 'scenauth_' + '0' * 40,
+            'outcome': kwargs['executor_receipt']['outcome'],
+        }
+
+
+@pytest.fixture(autouse=True)
+def _stub_scenario_hub_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main, '_scenario_authority_client', lambda: _AlwaysSucceedsScenarioAuthorityClient())
+
 
 
 def setup_module() -> None:
@@ -179,20 +212,20 @@ def test_http_get_scenario_detail_unknown_slug_is_404() -> None:
 
 
 def test_http_run_scenario_returns_completed_run() -> None:
-    response = client.post(f'/api/scenarios/{SLUG}/run')
+    response = client.post(f'/api/scenarios/{SLUG}/run', json=RUN_PAYLOAD)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body['status'] == 'completed'
-    assert body['trace_hash']
+    assert body['run']['status'] == 'completed'
+    assert body['run']['trace_hash']
 
 
 def test_http_run_unknown_scenario_is_404() -> None:
-    response = client.post('/api/scenarios/does-not-exist-v1/run')
+    response = client.post('/api/scenarios/does-not-exist-v1/run', json=RUN_PAYLOAD)
     assert response.status_code == 404
 
 
 def test_http_list_scenario_runs_after_running() -> None:
-    client.post(f'/api/scenarios/{SLUG}/run')
+    client.post(f'/api/scenarios/{SLUG}/run', json=RUN_PAYLOAD)
     response = client.get(f'/api/scenarios/{SLUG}/runs')
     assert response.status_code == 200, response.text
     runs = response.json()
@@ -201,10 +234,10 @@ def test_http_list_scenario_runs_after_running() -> None:
 
 
 def test_http_replay_scenario_reports_match() -> None:
-    client.post(f'/api/scenarios/{SLUG}/run')
-    response = client.post(f'/api/scenarios/{SLUG}/replay')
+    client.post(f'/api/scenarios/{SLUG}/run', json=RUN_PAYLOAD)
+    response = client.post(f'/api/scenarios/{SLUG}/replay', json=RUN_PAYLOAD)
     assert response.status_code == 200, response.text
-    assert response.json()['replay_match'] == 1
+    assert response.json()['run']['replay_match'] == 1
 
 
 def test_http_get_scenario_run_detail_unknown_id_is_404() -> None:
@@ -213,7 +246,7 @@ def test_http_get_scenario_run_detail_unknown_id_is_404() -> None:
 
 
 def test_http_get_scenario_run_detail_returns_full_trace() -> None:
-    run = client.post(f'/api/scenarios/{SLUG}/run').json()
-    response = client.get(f"/api/scenario-runs/{run['id']}")
+    run = client.post(f'/api/scenarios/{SLUG}/run', json=RUN_PAYLOAD).json()
+    response = client.get(f"/api/scenario-runs/{run['run']['id']}")
     assert response.status_code == 200, response.text
-    assert response.json()['trace_hash'] == run['trace_hash']
+    assert response.json()['trace_hash'] == run['run']['trace_hash']

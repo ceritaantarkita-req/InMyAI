@@ -90,3 +90,10 @@ export type FolderScope = {
   direct_subdirs: number
   large_folder: boolean
 }
+
+export type Scenario = { id: number; slug: string; name: string; version: number; description: string; script_json: string; created_at: string }
+export type ScenarioStepTrace = { title: string; states: string[]; result_text_sha256: string; verification: Record<string, unknown> }
+export type ScenarioTrace = { scenario_slug: string; scenario_version: number; steps: ScenarioStepTrace[] }
+export type ScenarioRun = { id: number; scenario_id: number; fixture_project_id: number; status: string; task_ids_json: string; trace_json: string; trace_hash: string | null; error: string | null; created_at: string; completed_at: string | null; replay_of_run_id: number | null; replay_match: number | null }
+export type ScenarioRunResult = { authorizationId: string; hubReceiptId: string | null; run: ScenarioRun }
+

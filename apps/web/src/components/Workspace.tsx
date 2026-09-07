@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Bot, BrainCircuit, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink,
-  FileCode2, FileInput, FileText, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
+  FileCode2, FileInput, FileText, FlaskConical, FolderOpen, GitBranch, HardDrive, ImageIcon, Laptop,
   Loader2, Map as MapIcon, MemoryStick, MessageSquareText, Network, PanelRightClose, PanelRightOpen, Paperclip, PlayCircle, Plus,
   RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, StopCircle,
   TerminalSquare, Users, Wrench, Workflow, X
@@ -15,7 +15,7 @@ import { conversationStorageKey, parseConversationResponse } from '@/lib/chat-hi
 import { clampPanelWidth, RAIL_DEFAULT, RAIL_MAX, RAIL_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '@/lib/layout'
 import { dismissOnboarding, shouldShowWizard } from '@/lib/onboarding'
 import { confirmDialog, isTauri, pickFileNative, pickFolderNative } from '@/lib/tauri'
-import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Task, TaskDetail } from '@/lib/types'
+import type { Agent, AllowedRoot, BrowseEntry, BrowseResult, ChatResponse, Decision, FolderScope, Hardware, IndexedFile, IndexStatus, Memory, OnboardingState, Project, Proposal, Relation, Scenario, ScenarioRun, ScenarioRunResult, ScenarioTrace, Task, TaskDetail } from '@/lib/types'
 
 // Loaded client-only: @xterm/xterm touches browser-only globals at module
 // load time, which crashes Next.js's server-side render pass if bundled
@@ -27,7 +27,7 @@ const TerminalView = dynamic(() => import('./TerminalView').then((mod) => mod.Te
   loading: () => <div className="explorer-loading"><Loader2 className="spin" size={22}/></div>
 })
 
-type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents' | 'explorer' | 'terminal'
+type View = 'chat' | 'files' | 'memory' | 'graph' | 'studio' | 'git' | 'agents' | 'explorer' | 'terminal' | 'scenarios'
 type ChatMessage = { role: 'user' | 'assistant'; content: string; route?: ChatResponse['route']; citations?: ChatResponse['citations'] }
 
 type NavItem = { id: View; label: string; icon: typeof Bot }
@@ -37,7 +37,8 @@ const navMain: NavItem[] = [
   { id: 'files', label: 'Files', icon: FileCode2 },
   { id: 'explorer', label: 'Explorer', icon: MapIcon },
   { id: 'graph', label: 'Graph', icon: Network },
-  { id: 'terminal', label: 'Terminal', icon: TerminalSquare }
+  { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
+  { id: 'scenarios', label: 'Scenarios', icon: FlaskConical }
 ]
 
 const navAdvanced: NavItem[] = [
@@ -321,7 +322,7 @@ export function Workspace() {
 
       <section className="main-column">
         <header className="topbar">
-          <div><h1>{[...navMain, ...navAdvanced].find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : 'Add a local project to begin.'}</p></div>
+          <div><h1>{[...navMain, ...navAdvanced].find((item) => item.id === view)?.label}</h1><p>{project ? project.name : view === 'explorer' ? 'Browse anywhere on disk - no project needed.' : view === 'terminal' ? 'A real local shell - no project needed.' : view === 'scenarios' ? 'One deterministic scenario, replayed on demand - no project needed.' : 'Add a local project to begin.'}</p></div>
           <div className="top-actions">
             <button className="icon-button" title="Index project" onClick={indexActiveProject} disabled={!project || busy}>{busy ? <Loader2 className="spin" size={18}/> : <RefreshCw size={18}/>}</button>
             <button className="icon-button" title={railOpen ? 'Hide context panel' : 'Show context panel'} onClick={toggleRail}>{railOpen ? <PanelRightClose size={18}/> : <PanelRightOpen size={18}/>}</button>
@@ -348,6 +349,8 @@ export function Workspace() {
             <ExplorerView onOpenProject={registerProjectFromExplorer} activeProject={project}/>
           ) : view === 'terminal' ? (
             <TerminalView initialPath={project?.path}/>
+          ) : view === 'scenarios' ? (
+            <ScenariosView/>
           ) : !project ? (
             <EmptyProject onOpen={() => setSettingsOpen(true)}/>
           ) : (
@@ -989,6 +992,109 @@ function AgentsView({ project }: { project: Project }) {
 const EXPLORER_ROOT_KEY = 'inmyai:explorer:lastRoot'
 type ExplorerSelection = { name: string; path: string; is_dir: boolean; is_project: boolean }
 
+const SCENARIO_SLUG = 'q11-3-context-recall-v1'
+const SCENARIO_TERMINAL_STATES = new Set(['completed', 'failed'])
+function scenarioStatusClass(status: string) {
+  if (status === 'completed') return 'applied'
+  if (status === 'failed') return 'rejected'
+  return 'pending'
+}
+function ScenariosView() {
+  const [scenario, setScenario] = useState<Scenario | null>(null)
+  const [runs, setRuns] = useState<ScenarioRun[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const load = useCallback(async () => {
+    const [scenarioData, runsData] = await Promise.all([
+      api<Scenario>(`/api/scenarios/${SCENARIO_SLUG}`),
+      api<ScenarioRun[]>(`/api/scenarios/${SCENARIO_SLUG}/runs`)
+    ])
+    setScenario(scenarioData)
+    const sorted = [...runsData].sort((a, b) => b.id - a.id)
+    setRuns(sorted)
+    setSelectedRunId((current) => current ?? (sorted[0]?.id ?? null))
+  }, [])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    const selected = runs.find((r) => r.id === selectedRunId)
+    if (!selected || SCENARIO_TERMINAL_STATES.has(selected.status)) return
+    pollRef.current = setInterval(() => { void load() }, 2000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [runs, selectedRunId, load])
+  const selectedRun = runs.find((r) => r.id === selectedRunId) || null
+  const trace: ScenarioTrace | null = useMemo(() => {
+    if (!selectedRun?.trace_json) return null
+    try { return JSON.parse(selectedRun.trace_json) } catch { return null }
+  }, [selectedRun])
+  const runScenario = useCallback(async (kind: 'run' | 'replay') => {
+    setBusy(true)
+    setError('')
+    try {
+      const body = { idempotency_key: newIdempotencyKey(`scenario-${kind}`) }
+      const path = kind === 'run'
+        ? `/api/scenarios/${SCENARIO_SLUG}/run`
+        : `/api/scenarios/${SCENARIO_SLUG}/replay${selectedRunId ? `?against_run_id=${selectedRunId}` : ''}`
+      const result = await api<ScenarioRunResult>(path, { method: 'POST', body: JSON.stringify(body) })
+      await load()
+      setSelectedRunId(result.run.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Scenario action failed')
+    } finally {
+      setBusy(false)
+    }
+  }, [load, selectedRunId])
+  return (
+    <div className="task-columns">
+      <div className="task-list">
+        <h3>RUNS</h3>
+        {scenario && <div style={{ marginBottom: 12 }}><strong>{scenario.name}</strong><br/><small>{scenario.description}</small></div>}
+        <div className="task-detail-actions" style={{ marginBottom: 10 }}>
+          <button className="primary" onClick={() => void runScenario('run')} disabled={busy}>{busy ? <Loader2 className="spin" size={14}/> : <PlayCircle size={14}/>}Run</button>
+          <button onClick={() => void runScenario('replay')} disabled={busy || !selectedRunId}>{busy ? <Loader2 className="spin" size={14}/> : <RefreshCw size={14}/>}Replay</button>
+        </div>
+        {error && <div className="notice"><span>{error}</span></div>}
+        {runs.map((run) => (
+          <button key={run.id} className={selectedRunId === run.id ? 'active' : ''} onClick={() => setSelectedRunId(run.id)}>
+            <span className={`status ${scenarioStatusClass(run.status)}`}>{run.status}</span>
+            <span>#{run.id}</span>
+          </button>
+        ))}
+        {!runs.length && <p>No runs yet.</p>}
+      </div>
+      <div className="task-detail">
+        {!selectedRun ? <p>Select or start a run.</p> : (
+          <>
+            <div className="task-detail-header">
+              <div><strong>Run #{selectedRun.id}</strong><span className={`status ${scenarioStatusClass(selectedRun.status)}`}>{selectedRun.status}</span></div>
+            </div>
+            {selectedRun.error && <div className="notice"><span>{selectedRun.error}</span></div>}
+            {selectedRun.replay_of_run_id != null && (
+              <p>Replay of run #{selectedRun.replay_of_run_id} - <span className={`status ${selectedRun.replay_match ? 'applied' : 'rejected'}`}>{selectedRun.replay_match ? 'MATCH' : 'MISMATCH'}</span></p>
+            )}
+            <p><small>trace hash: {selectedRun.trace_hash || 'n/a'}</small></p>
+            <div className="event-timeline">
+              {trace?.steps.map((step, i) => (
+                <div key={i} className={`event-row ${step.states[step.states.length - 1] || ''}`}>
+                  <div className="event-dot"/>
+                  <strong>{step.title}</strong>
+                  <p>{step.states.join(' -> ')}</p>
+                  <small>result sha256: {step.result_text_sha256.slice(0, 16)}...</small>
+                  {Object.keys(step.verification).length > 0 && (
+                    <small>verification: {Object.entries(step.verification).map(([k, v]) => `${k}=${String(v)}`).join(', ')}</small>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ExplorerView({ onOpenProject, activeProject }: { onOpenProject: (path: string, name: string) => Promise<void>; activeProject: Project | null }) {
   const [rootInput, setRootInput] = useState('')
   const [currentPath, setCurrentPath] = useState<string | null>(null)
@@ -1309,10 +1415,10 @@ function InlineFolderBrowser({ startPath, onSelect, onClose }: { startPath: stri
   function goUp() { if (current?.parent) void load(current.parent) }
 
   return <div className="inline-browser" onMouseDown={(e) => e.stopPropagation()}>
-    <form onSubmit={(e) => { e.preventDefault(); void load(pathInput) }}>
+    <div className="inline-browser-form" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void load(pathInput) } }}>
       <input value={pathInput} onChange={(e) => setPathInput(e.target.value)} placeholder="C:\ or /home"/>
-      <button className="secondary small" type="submit">{loading ? <Loader2 className="spin" size={13}/> : 'Go'}</button>
-    </form>
+      <button className="secondary small" type="button" onClick={() => void load(pathInput)}>{loading ? <Loader2 className="spin" size={13}/> : 'Go'}</button>
+    </div>
     {error && <p className="form-error">{error}</p>}
     {current && <>
       <div className="inline-browser-toolbar">

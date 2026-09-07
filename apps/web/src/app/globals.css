@@ -237,7 +237,7 @@ pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; whi
 .path-input-row { display: flex; gap: 6px; }
 .path-input-row input { flex: 1; min-width: 0; }
 .inline-browser { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f8f9fb; display: grid; gap: 8px; }
-.inline-browser form { display: flex; gap: 6px; }
+.inline-browser .inline-browser-form { display: flex; gap: 6px; }
 .inline-browser-toolbar { display: flex; align-items: center; gap: 8px; font-size: 9px; color: var(--muted); }
 .inline-browser-toolbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inline-browser-list { display: grid; gap: 3px; max-height: 220px; overflow-y: auto; }

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import uuid
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,7 @@ _FIXTURE_MEMORY: dict[str, Any] = {
     'source': 'scenario-fixture',
     'confidence': 1.0,
 }
-_CONTEXT_RECALL_SCRIPT = [
+_CONTEXT_RECALL_SCRIPT_VARIANT_1 = [
     {
         'title': 'Recall project memory',
         'instruction': (
@@ -120,17 +121,44 @@ _CONTEXT_RECALL_SCRIPT = [
     },
 ]
 
+_CONTEXT_RECALL_SCRIPT_VARIANT_2 = [
+    {
+        'title': 'Summarize the fixture memory',
+        'instruction': (
+            'Look at the project memory notes recorded for this project and summarize what '
+            'they say this fixture project is actually for.'
+        ),
+    },
+    {
+        'title': 'Describe the context-kernel design',
+        'instruction': (
+            'Using the indexed project files, describe how InMyAI keeps a context kernel '
+            'outside the model according to the architecture note.'
+        ),
+    },
+    {
+        'title': 'Tie memory and files together',
+        'instruction': (
+            'Combining the project memory and the indexed architecture note, explain why a '
+            'scenario run with the same seed is expected to reproduce this exact trace.'
+        ),
+    },
+]
+
 BUILTIN_SCENARIOS: list[dict[str, Any]] = [
     {
         'slug': 'q11-3-context-recall-v1',
         'name': 'Context recall (memory + file citations)',
-        'version': 1,
+        'version': 2,
         'description': (
-            'Rung 1 of Phase 12 (replayable deterministic scenario): a fixed 3-step task '
-            'script against a freshly seeded fixture project (1 memory, 1 file, no decisions '
-            '-- see module docstring), provider pinned to mock throughout.'
+            'Rung 2 of Phase 12 (bounded stochastic scenario): a fixed 3-step task script, '
+            'picked from a small authored set of variants by seeded selection, against a '
+            'freshly seeded fixture project (1 memory, 1 file, no decisions -- see module '
+            'docstring), provider pinned to mock throughout. A fresh run picks a new random '
+            'seed; a replay reuses the seed from the run it is replaying, so it '
+            'deterministically reselects the same variant and must still hash-match exactly.'
         ),
-        'script': _CONTEXT_RECALL_SCRIPT,
+        'variants': [_CONTEXT_RECALL_SCRIPT_VARIANT_1, _CONTEXT_RECALL_SCRIPT_VARIANT_2],
     },
 ]
 
@@ -140,10 +168,15 @@ def ensure_builtin_scenarios() -> None:
     with transaction() as conn:
         for scenario in BUILTIN_SCENARIOS:
             conn.execute(
-                '''INSERT OR IGNORE INTO scenarios(slug,name,version,description,script_json,created_at)
-                   VALUES(?,?,?,?,?,?)''',
+                '''INSERT INTO scenarios(slug,name,version,description,script_json,created_at)
+                   VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(slug) DO UPDATE SET
+                       name=excluded.name,
+                       version=excluded.version,
+                       description=excluded.description,
+                       script_json=excluded.script_json''',
                 (scenario['slug'], scenario['name'], scenario['version'], scenario['description'],
-                 _canonical_json(scenario['script']), now)
+                 _canonical_json({'variants': scenario['variants']}), now)
             )
 
 
@@ -209,20 +242,34 @@ def _canonicalize_step_trace(detail: dict) -> dict:
     }
 
 
-async def run_scenario(slug: str) -> dict:
+def _variants_from_script_json(raw: str) -> list[list[dict]]:
+    parsed = json.loads(raw)
+    if isinstance(parsed, dict) and 'variants' in parsed:
+        return parsed['variants']
+    # Backward compatible: a flat step list (rung 1's shape, and what a
+    # handful of existing tests still insert directly) is treated as a
+    # single implicit variant.
+    return [parsed]
+
+
+async def run_scenario(slug: str, seed: int | None = None) -> dict:
     """Seed a fresh fixture project, walk the scenario's script through the
     existing agent_runtime pipeline, and persist the canonical trace."""
     scenario = get_scenario(slug)
-    script = json.loads(scenario['script_json'])
+    variants = _variants_from_script_json(scenario['script_json'])
+    if seed is None:
+        seed = secrets.randbits(63)
+    variant_index = seed % len(variants)
+    script = variants[variant_index]
 
     project = _seed_fixture_project(scenario['slug'])
 
     now = utc_now()
     with transaction() as conn:
         cur = conn.execute(
-            '''INSERT INTO scenario_runs(scenario_id,fixture_project_id,status,task_ids_json,trace_json,created_at)
-               VALUES(?,?,?,?,?,?)''',
-            (scenario['id'], project['id'], 'running', '[]', '{}', now)
+            '''INSERT INTO scenario_runs(scenario_id,fixture_project_id,status,task_ids_json,trace_json,seed,created_at)
+               VALUES(?,?,?,?,?,?,?)''',
+            (scenario['id'], project['id'], 'running', '[]', '{}', seed, now)
         )
         run_id = cur.lastrowid
 
@@ -238,6 +285,7 @@ async def run_scenario(slug: str) -> dict:
         trace = {
             'scenario_slug': scenario['slug'],
             'scenario_version': scenario['version'],
+            'variant_index': variant_index,
             'steps': step_traces,
         }
         trace_hash = _sha256_text(_canonical_json(trace))
@@ -282,7 +330,12 @@ async def replay_scenario(slug: str, against_run_id: int | None = None) -> dict:
             raise ValueError('No completed run exists yet for this scenario to replay against -- run it first.')
         baseline = dict(row)
 
-    new_run = await run_scenario(slug)
+    if baseline['seed'] is None:
+        raise ValueError(
+            'This run predates seeded variant selection (seed is unset) and cannot be replayed -- run a fresh scenario first.'
+        )
+
+    new_run = await run_scenario(slug, seed=baseline['seed'])
     match = bool(new_run['trace_hash']) and new_run['trace_hash'] == baseline['trace_hash']
 
     with transaction() as conn:

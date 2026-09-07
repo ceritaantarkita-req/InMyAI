@@ -67,11 +67,14 @@ def test_builtin_scenario_is_listed() -> None:
     assert SLUG in slugs
 
 
-def test_get_scenario_returns_full_script() -> None:
+def test_get_scenario_returns_variants_with_full_scripts() -> None:
     scenario = scenario_runtime.get_scenario(SLUG)
-    script = json.loads(scenario['script_json'])
-    assert len(script) == 3
-    assert all({'title', 'instruction'} <= set(step) for step in script)
+    payload = json.loads(scenario['script_json'])
+    variants = payload['variants']
+    assert len(variants) == 2
+    for variant in variants:
+        assert len(variant) == 3
+        assert all({'title', 'instruction'} <= set(step) for step in variant)
 
 
 def test_get_scenario_unknown_slug_raises_keyerror() -> None:
@@ -113,19 +116,21 @@ def test_two_runs_use_two_different_fixture_projects() -> None:
     assert run_a['fixture_project_id'] != run_b['fixture_project_id']
 
 
-def test_two_independent_runs_produce_identical_trace_hash() -> None:
-    """The core Rung-1 proof: two freshly, independently-seeded fixture
-    projects run through the exact same script must produce byte-identical
-    canonical traces."""
-    run_a = asyncio.run(scenario_runtime.run_scenario(SLUG))
-    run_b = asyncio.run(scenario_runtime.run_scenario(SLUG))
+def test_two_runs_with_same_seed_produce_identical_trace_hash() -> None:
+    """Rung-2 replacement for Rung-1's "always identical" guarantee: two
+    independently-seeded fixture projects run with the SAME explicit seed
+    must still produce byte-identical canonical traces (same seed -> same
+    variant -> same trace), even though the fixture projects themselves
+    are distinct."""
+    run_a = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=424242))
+    run_b = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=424242))
     assert run_a['fixture_project_id'] != run_b['fixture_project_id']
     assert run_a['trace_hash'] == run_b['trace_hash']
 
 
-def test_two_independent_runs_match_step_by_step() -> None:
-    run_a = asyncio.run(scenario_runtime.run_scenario(SLUG))
-    run_b = asyncio.run(scenario_runtime.run_scenario(SLUG))
+def test_two_runs_with_same_seed_match_step_by_step() -> None:
+    run_a = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=424242))
+    run_b = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=424242))
     steps_a = json.loads(run_a['trace_json'])['steps']
     steps_b = json.loads(run_b['trace_json'])['steps']
     assert len(steps_a) == len(steps_b) == 3
@@ -142,6 +147,42 @@ def test_verification_trace_excludes_volatile_subprocess_fields() -> None:
         assert 'test_exit_code' not in verification
         assert 'test_output_tail' not in verification
         assert verification.get('test_command') is None
+
+
+def test_seed_selects_variant_deterministically() -> None:
+    scenario = scenario_runtime.get_scenario(SLUG)
+    variants = json.loads(scenario['script_json'])['variants']
+    assert len(variants) == 2
+    # seed % len(variants) is the whole mechanism -- seed=0 always selects
+    # variant index 0, and with exactly 2 variants, seed=1 always selects
+    # variant index 1.
+    run_0 = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=0))
+    trace_0 = json.loads(run_0['trace_json'])
+    assert trace_0['variant_index'] == 0
+    assert trace_0['steps'][0]['title'] == variants[0][0]['title']
+    run_1 = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=1))
+    trace_1 = json.loads(run_1['trace_json'])
+    assert trace_1['variant_index'] == 1
+    assert trace_1['steps'][0]['title'] == variants[1][0]['title']
+
+
+def test_replay_reuses_original_seed_and_selects_same_variant() -> None:
+    baseline = asyncio.run(scenario_runtime.run_scenario(SLUG, seed=1))
+    replay = asyncio.run(scenario_runtime.replay_scenario(SLUG))
+    assert replay['seed'] == baseline['seed'] == 1
+    assert json.loads(replay['trace_json'])['variant_index'] == 1
+    assert replay['trace_hash'] == baseline['trace_hash']
+
+
+def test_replay_against_run_missing_seed_raises_valueerror() -> None:
+    """Legacy safety net: a completed run from before the seed column
+    existed has seed=NULL. Replaying it must fail loudly rather than
+    silently generating a fresh, non-reproducing seed."""
+    baseline = asyncio.run(scenario_runtime.run_scenario(SLUG))
+    with transaction() as conn:
+        conn.execute('UPDATE scenario_runs SET seed=NULL WHERE id=?', (baseline['id'],))
+    with pytest.raises(ValueError):
+        asyncio.run(scenario_runtime.replay_scenario(SLUG, against_run_id=baseline['id']))
 
 
 def test_replay_with_no_prior_completed_run_raises_valueerror() -> None:
